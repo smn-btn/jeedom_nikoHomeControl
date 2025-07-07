@@ -17,121 +17,147 @@ import logging
 import sys
 import os
 import time
-import traceback
 import signal
 import json
 import argparse
+import paho.mqtt.client as mqtt
+import ssl
 
-from jeedom.jeedom import jeedom_socket, jeedom_utils, jeedom_com, JEEDOM_SOCKET_MESSAGE  # jeedom_serial
+# Cette partie charge les outils Jeedom pour Python
+from jeedom.jeedom import jeedom_socket, jeedom_utils, jeedom_com, JEEDOM_SOCKET_MESSAGE
 
 
-def read_socket():
-    if not JEEDOM_SOCKET_MESSAGE.empty():
-        logging.debug("Message received in socket JEEDOM_SOCKET_MESSAGE")
-        message = json.loads(jeedom_utils.stripped(JEEDOM_SOCKET_MESSAGE.get()))
-        if message['apikey'] != _apikey:
-            logging.error("Invalid apikey from socket: %s", message)
-            return
-        try:
-            print('read')
-        except Exception as e:
-            logging.error('Send command to demon error: %s', e)
+# --- FONCTIONS DE GESTION MQTT ---
 
+# Cette fonction est appelée quand le client MQTT réussit à se connecter
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        logging.info("Connexion au broker MQTT de Niko Home Control réussie !")
+        # Une fois connecté, on s'abonne aux sujets qui nous intéressent
+        # Le topic 'hobby/control/devices/evt' nous donnera les changements d'état en temps réel
+        logging.info("Abonnement au topic: hobby/control/devices/evt/#")
+        client.subscribe("hobby/control/devices/evt/#")
+        # Le topic 'hobby/control/devices/rsp' nous donnera les réponses à nos commandes
+        logging.info("Abonnement au topic: hobby/control/devices/rsp/#")
+        client.subscribe("hobby/control/devices/rsp/#")
+    else:
+        logging.error("Échec de la connexion MQTT, code de retour : %s", rc)
+
+# Cette fonction est appelée chaque fois qu'un message est reçu sur un sujet auquel on est abonné
+def on_message(client, userdata, msg):
+    logging.info("Message reçu sur le topic [%s]: %s", msg.topic, msg.payload.decode())
+    # TODO: Ici, nous traiterons plus tard les messages pour mettre à jour Jeedom
+
+# --- FONCTION PRINCIPALE DU DÉMON ---
 
 def listen():
-    my_jeedom_socket.open()
+    logging.info("Démarrage du client MQTT...")
+    
+    # Création d'un client MQTT
+    # Le client_id doit être unique, on en génère un aléatoire.
+    client = mqtt.Client(client_id="jeedom_nhc_plugin_" + str(os.getpid()))
+
+    # Assignation des fonctions de callback
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    # Configuration de l'authentification
+    # Le mot de passe est le jeton JWT. [cite_start]Le nom d'utilisateur est fourni par Niko[cite: 137, 138].
+    logging.info("Configuration de l'authentification avec l'utilisateur 'hobby'")
+    client.username_pw_set("hobby", password=_niko_jwt)
+    
+    # Configuration de la connexion sécurisée (SSL/TLS)
+    # La passerelle Niko utilise un port sécurisé.
+    logging.info("Configuration de la connexion sécurisée (TLS)")
+    # [cite_start]Note : pour une sécurité maximale, il faudrait utiliser le certificat CA fourni par Niko [cite: 93]
+    # Pour commencer, nous ignorons la vérification du certificat, ce qui est plus simple.
+    client.tls_set(cert_reqs=ssl.CERT_NONE)
+    client.tls_insecure_set(True)
+
     try:
-        while 1:
-            time.sleep(0.5)
-            read_socket()
-    except KeyboardInterrupt:
+        logging.info("Tentative de connexion à %s sur le port 8884...", _niko_ip)
+        client.connect(_niko_ip, 8884, 60)
+        # client.loop_forever() est bloquant, il garde le script en vie
+        # et gère la reconnexion automatiquement.
+        client.loop_forever()
+    except Exception as e:
+        logging.error("Erreur fatale lors de la connexion ou dans la boucle MQTT: %s", e)
         shutdown()
 
+# --- GESTION DU DÉMON (Code standard Jeedom) ---
 
 def handler(signum=None, frame=None):
     logging.debug("Signal %i caught, exiting...", int(signum))
     shutdown()
 
-
 def shutdown():
-    logging.debug("Shutdown")
+    logging.info("Arrêt du démon...")
     logging.debug("Removing PID file %s", _pidfile)
     try:
         os.remove(_pidfile)
     except Exception as e:
         logging.warning('Error removing PID file: %s', e)
-    try:
-        my_jeedom_socket.close()
-    except Exception as e:
-        logging.warning('Error closing socket: %s', e)
-    # try:  # if you need jeedom_serial
-    #     my_jeedom_serial.close()
-    # except Exception as e:
-    #     logging.warning('Error closing serial: %s', e)
     logging.debug("Exit 0")
     sys.stdout.flush()
     os._exit(0)
 
-
-_log_level = "error"
-_socket_port = 55009
-_socket_host = 'localhost'
-_device = 'auto'
-_pidfile = '/tmp/demond.pid'
-_apikey = ''
-_callback = ''
-_cycle = 0.3
-
-parser = argparse.ArgumentParser(description='Desmond Daemon for Jeedom plugin')
-parser.add_argument("--device", help="Device", type=str)
+# Parsing des arguments passés par Jeedom au démon
+parser = argparse.ArgumentParser(description='Démon pour le plugin Niko Home Control')
 parser.add_argument("--loglevel", help="Log Level for the daemon", type=str)
 parser.add_argument("--callback", help="Callback", type=str)
 parser.add_argument("--apikey", help="Apikey", type=str)
-parser.add_argument("--cycle", help="Cycle to send event", type=float)
 parser.add_argument("--pid", help="Pid file", type=str)
-parser.add_argument("--socketport", help="Port for socket server", type=int)
+parser.add_argument("--niko_ip", help="Niko Gateway IP", type=str)
+parser.add_argument("--niko_jwt", help="Niko JWT Token", type=str)
 args = parser.parse_args()
 
-if args.device:
-    _device = args.device
-if args.loglevel:
-    _log_level = args.loglevel
-if args.callback:
-    _callback = args.callback
-if args.apikey:
-    _apikey = args.apikey
+# Configuration initiale
+_pidfile = '/tmp/nhc_demond.pid'
 if args.pid:
     _pidfile = args.pid
-if args.cycle:
-    _cycle = float(args.cycle)
-if args.socketport:
-    _socket_port = args.socketport
 
-_socket_port = int(_socket_port)
+_log_level = "error"
+if args.loglevel:
+    _log_level = args.loglevel
 
+_apikey = ""
+if args.apikey:
+    _apikey = args.apikey
+    
+_callback = ""
+if args.callback:
+    _callback = args.callback
+
+# On récupère l'IP et le Jeton passés en argument
+_niko_ip = ""
+if args.niko_ip:
+    _niko_ip = args.niko_ip
+
+_niko_jwt = ""
+if args.niko_jwt:
+    _niko_jwt = args.niko_jwt
+
+# Configuration des logs
 jeedom_utils.set_log_level(_log_level)
 
-logging.info('Start demond')
-logging.info('Log level: %s', _log_level)
-logging.info('Socket port: %s', _socket_port)
-logging.info('Socket host: %s', _socket_host)
-logging.info('PID file: %s', _pidfile)
-logging.info('Apikey: %s', _apikey)
-logging.info('Device: %s', _device)
+# Vérification des paramètres essentiels
+if not _niko_ip or not _niko_jwt:
+    logging.error("L'adresse IP de la passerelle Niko ou le Jeton JWT ne sont pas configurés. Arrêt du démon.")
+    exit()
+    
+logging.info('Démarrage du démon nhc')
+logging.info('Log level : %s', _log_level)
+logging.info('PID file : %s', _pidfile)
+logging.info('IP Passerelle : %s', _niko_ip)
 
+# Gestion des signaux d'arrêt
 signal.signal(signal.SIGINT, handler)
 signal.signal(signal.SIGTERM, handler)
 
+# Lancement du démon
 try:
     jeedom_utils.write_pid(str(_pidfile))
-    my_jeedom_com = jeedom_com(apikey=_apikey, url=_callback, cycle=_cycle)
-    if not my_jeedom_com.test():
-        logging.error('Network communication issues. Please fixe your Jeedom network configuration.')
-        shutdown()
-    # my_jeedom_serial = jeedom_serial(device=_device)  # if you need jeedom_serial
-    my_jeedom_socket = jeedom_socket(port=_socket_port, address=_socket_host)
-    listen()
+    listen() # On lance notre fonction principale
 except Exception as e:
     logging.error('Fatal error: %s', e)
-    logging.info(traceback.format_exc())
     shutdown()

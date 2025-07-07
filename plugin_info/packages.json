@@ -4,7 +4,7 @@
   "apt": {
   },
   "pip3": {
-    "pyserial" : {"reinstall" : true},
+    "paho-mqtt": {"reinstall": true},
     "requests" : {"reinstall" : true}
   },
   "npm": {
