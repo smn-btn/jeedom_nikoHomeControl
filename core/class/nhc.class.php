@@ -143,7 +143,7 @@ class nhc extends eqLogic {
     $path = realpath(dirname(__FILE__) . '/../../resources/demond');
     log::add('nhc', 'debug', 'Répertoire démon: ' . $path);
     
-    $python_venv_path = dirname(__FILE__) . '/../../resources/python_venv/bin/python3';
+    $python_venv_path = dirname(__FILE__) . '/../../resources/venv/bin/python3';
     $python_venv = file_exists($python_venv_path) ? $python_venv_path : false;
     log::add('nhc', 'debug', 'Chemin venv: ' . $python_venv_path);
     log::add('nhc', 'debug', 'Venv existe: ' . ($python_venv ? 'OUI' : 'NON'));
@@ -349,7 +349,7 @@ class nhc extends eqLogic {
     log::add('nhc', 'debug', 'Vérification dépendances Python...');
     
     // Déterminer quel Python utiliser (environnement virtuel ou système)
-    $python_venv_path = dirname(__FILE__) . '/../../resources/python_venv/bin/python3';
+    $python_venv_path = dirname(__FILE__) . '/../../resources/venv/bin/python3';
     $python_venv = file_exists($python_venv_path) ? $python_venv_path : false;
     log::add('nhc', 'debug', 'Chemin venv: ' . $python_venv_path);
     log::add('nhc', 'debug', 'Venv existe: ' . ($python_venv ? 'OUI' : 'NON'));
@@ -390,24 +390,13 @@ class nhc extends eqLogic {
     log::add('nhc', 'debug', 'Version Python: ' . trim($python_version));
     
     // Vérifier la présence du module paho-mqtt
-    log::add('nhc', 'debug', 'Test module paho-mqtt...');
-    $mqtt_check = shell_exec($python_cmd . ' -c "import paho.mqtt.client" 2>&1');
-    log::add('nhc', 'debug', 'Résultat paho-mqtt: ' . (empty(trim($mqtt_check)) ? 'OK' : 'ERREUR: ' . trim($mqtt_check)));
+    log::add('nhc', 'debug', 'Test des modules Python avec script de validation...');
+    $validation_script = dirname(__FILE__) . '/../../resources/validate_dependencies.sh';
+    $validation_result = shell_exec($validation_script . ' 2>&1');
+    log::add('nhc', 'debug', 'Résultat validation: ' . trim($validation_result));
     
-    if (!empty(trim($mqtt_check))) {
-      log::add('nhc', 'error', 'ÉCHEC: Module paho-mqtt manquant');
-      $return['state'] = 'nok';
-      log::add('nhc', 'debug', '=== FIN dependancy_info() - ÉCHEC ===');
-      return $return;
-    }
-    
-    // Vérifier la présence du module requests
-    log::add('nhc', 'debug', 'Test module requests...');
-    $requests_check = shell_exec($python_cmd . ' -c "import requests" 2>&1');
-    log::add('nhc', 'debug', 'Résultat requests: ' . (empty(trim($requests_check)) ? 'OK' : 'ERREUR: ' . trim($requests_check)));
-    
-    if (!empty(trim($requests_check))) {
-      log::add('nhc', 'error', 'ÉCHEC: Module requests manquant');
+    if (trim($validation_result) !== 'OK') {
+      log::add('nhc', 'error', 'ÉCHEC: Dépendances Python manquantes ou incorrectes');
       $return['state'] = 'nok';
       log::add('nhc', 'debug', '=== FIN dependancy_info() - ÉCHEC ===');
       return $return;

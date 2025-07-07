@@ -1,23 +1,6 @@
 {
-  "pre-install": {
-  },
-  "apt": {
-  },
   "pip3": {
-    "paho-mqtt": {"reinstall": true},
-    "requests" : {"reinstall" : true}
-  },
-  "npm": {
-    "plugins/nhc/ressources/demond"  : {}
-  },
-  "composer": {
-       "plugins/nhc"  : {}
-  },
-  "yarn": {
-    "plugins/nhc/ressources/demond"  : {}
-  },
-  "plugin": {
-  },
-  "post-install": {
+    "paho-mqtt": {"version": "1.6.1"},
+    "requests": {}
   }
 }
