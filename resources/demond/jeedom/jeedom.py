@@ -19,13 +19,28 @@ import logging
 from threading import Thread
 import requests
 from collections.abc import Mapping
-import serial
+# NOTE: Les modules serial et pyudev sont importés ci-dessous pour le framework Jeedom générique
+# mais ne sont PAS utilisés dans le plugin NHC qui utilise exclusivement MQTT
+# Import optionnel pour éviter les erreurs si ces modules ne sont pas installés
+try:
+    import serial
+    SERIAL_AVAILABLE = True
+except ImportError:
+    SERIAL_AVAILABLE = False
+    logging.warning("Module 'serial' non disponible - fonctionnalités série désactivées")
+
 import os
 from queue import Queue
 import socketserver
 from socketserver import (TCPServer, StreamRequestHandler)
 import unicodedata
-import pyudev
+
+try:
+    import pyudev
+    PYUDEV_AVAILABLE = True
+except ImportError:
+    PYUDEV_AVAILABLE = False
+    logging.warning("Module 'pyudev' non disponible - détection USB désactivée")
 
 
 class jeedom_com():
@@ -139,6 +154,10 @@ class jeedom_utils():
 
     @staticmethod
     def find_tty_usb(idVendor, idProduct, product=None):
+        if not PYUDEV_AVAILABLE:
+            logging.error("Module 'pyudev' non disponible. Installez avec: pip install pyudev")
+            return None
+        
         context = pyudev.Context()
         for device in context.list_devices(subsystem='tty'):
             if 'ID_VENDOR' not in device:
@@ -204,6 +223,8 @@ class jeedom_utils():
 class jeedom_serial():
 
     def __init__(self, device='', rate='', timeout=9, rtscts=True, xonxoff=False):
+        if not SERIAL_AVAILABLE:
+            raise ImportError("Module 'serial' non disponible. Installez avec: pip install pyserial")
         self.device = device
         self.rate = rate
         self.timeout = timeout
