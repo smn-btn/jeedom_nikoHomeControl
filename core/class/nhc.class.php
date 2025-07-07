@@ -74,51 +74,50 @@ class nhc extends eqLogic {
   * Permet de récupérer les informations sur le démon
   */
   public static function deamon_info() {
+    log::add('nhc', 'debug', '=== DÉBUT deamon_info() ===');
+    
     $return = array();
     $return['log'] = 'nhc';
     $return['state'] = 'nok';
     $pid_file = jeedom::getTmpFolder('nhc') . '/demond.pid';
+    log::add('nhc', 'debug', 'Fichier PID: ' . $pid_file);
+    
     if (file_exists($pid_file)) {
+      log::add('nhc', 'debug', 'Fichier PID trouvé');
       if (posix_getsid(trim(file_get_contents($pid_file)))) {
         $return['state'] = 'ok';
+        log::add('nhc', 'debug', 'Démon actif');
       } else {
+        log::add('nhc', 'debug', 'Démon inactif, suppression fichier PID');
         shell_exec(system::getCmdSudo() . 'rm -rf ' . $pid_file . ' 2>&1 > /dev/null');
       }
+    } else {
+      log::add('nhc', 'debug', 'Fichier PID non trouvé');
     }
     
-    // Vérifier si les dépendances Python sont installées
-    $return['launchable'] = 'nok';
+    // Vérifier si le démon peut être lancé (configuration)
+    $return['launchable'] = 'ok';
     $return['launchable_message'] = '';
     
-    // Vérifier la présence de Python3
-    $python_check = shell_exec('which python3 2>/dev/null');
-    if (empty(trim($python_check))) {
-      $return['launchable_message'] = 'Python3 non trouvé';
-      return $return;
+    // Vérifier configuration Niko Home Control
+    $niko_ip = config::byKey('niko_ip', 'nhc', '');
+    $niko_jwt = config::byKey('niko_jwt', 'nhc', '');
+    
+    if (empty($niko_ip)) {
+      $return['launchable'] = 'nok';
+      $return['launchable_message'] = 'L\'adresse IP Niko Home Control n\'est pas configurée';
+      log::add('nhc', 'error', 'ÉCHEC: ' . $return['launchable_message']);
+    } elseif (empty($niko_jwt)) {
+      $return['launchable'] = 'nok';
+      $return['launchable_message'] = 'Le token JWT Niko Home Control n\'est pas configuré';
+      log::add('nhc', 'error', 'ÉCHEC: ' . $return['launchable_message']);
     }
     
-    // Vérifier la présence du module paho-mqtt
-    $mqtt_check = shell_exec('python3 -c "import paho.mqtt.client" 2>&1');
-    if (!empty(trim($mqtt_check))) {
-      $return['launchable_message'] = 'Module paho-mqtt manquant. Installez avec: sudo apt install python3-paho-mqtt';
-      return $return;
+    if ($return['launchable'] == 'ok') {
+      log::add('nhc', 'info', 'SUCCÈS: Configuration OK, démon peut être lancé');
     }
     
-    // Vérifier la présence du module requests
-    $requests_check = shell_exec('python3 -c "import requests" 2>&1');
-    if (!empty(trim($requests_check))) {
-      $return['launchable_message'] = 'Module requests manquant. Installez avec: sudo apt install python3-requests';
-      return $return;
-    }
-    
-    // Vérifier la présence du fichier démon
-    $demond_path = realpath(dirname(__FILE__) . '/../../resources/demond/demond.py');
-    if (!file_exists($demond_path)) {
-      $return['launchable_message'] = 'Fichier démon manquant: ' . $demond_path;
-      return $return;
-    }
-    
-    $return['launchable'] = 'ok';
+    log::add('nhc', 'debug', '=== FIN deamon_info() ===');
     
     return $return;
   }
@@ -127,25 +126,83 @@ class nhc extends eqLogic {
   * Permet de lancer le démon
   */
   public static function deamon_start() {
+    log::add('nhc', 'debug', '=== DÉBUT deamon_start() ===');
+    
+    log::add('nhc', 'debug', 'Arrêt du démon existant...');
     self::deamon_stop();
+    
+    log::add('nhc', 'debug', 'Vérification des dépendances...');
     $deamon_info = self::deamon_info();
+    log::add('nhc', 'debug', 'Résultat vérification: launchable=' . $deamon_info['launchable'] . ', message=' . $deamon_info['launchable_message']);
+    
     if ($deamon_info['launchable'] != 'ok') {
+      log::add('nhc', 'error', 'ÉCHEC démarrage: dépendances non satisfaites');
       throw new Exception(__('Veuillez vérifier la configuration', __FILE__));
     }
     
     $path = realpath(dirname(__FILE__) . '/../../resources/demond');
-    $cmd = 'cd ' . $path . ' && python3 demond.py';
-    $cmd .= ' --loglevel ' . log::convertLogLevel(log::getLogLevel('nhc'));
-    $cmd .= ' --socketport ' . config::byKey('socketport', 'nhc', '55001');
-    $cmd .= ' --callback ' . network::getNetworkAccess('internal', 'proto:127.0.0.1:port:comp') . '/plugins/nhc/core/php/jeedomCallback.php';
-    $cmd .= ' --apikey ' . jeedom::getApiKey('nhc');
-    $cmd .= ' --pid ' . jeedom::getTmpFolder('nhc') . '/demond.pid';
+    log::add('nhc', 'debug', 'Répertoire démon: ' . $path);
+    
+    $python_venv_path = dirname(__FILE__) . '/../../resources/python_venv/bin/python3';
+    $python_venv = file_exists($python_venv_path) ? $python_venv_path : false;
+    log::add('nhc', 'debug', 'Chemin venv: ' . $python_venv_path);
+    log::add('nhc', 'debug', 'Venv existe: ' . ($python_venv ? 'OUI' : 'NON'));
+    
+    if ($python_venv) {
+      $python_venv_real = realpath($python_venv_path);
+      log::add('nhc', 'debug', 'Venv pointe vers: ' . ($python_venv_real ? $python_venv_real : 'ERREUR'));
+    }
+    
+    // Utiliser l'environnement virtuel Python si disponible, sinon python3 système
+    $python_cmd = $python_venv ? $python_venv : 'python3';
+    log::add('nhc', 'debug', 'Python choisi: ' . $python_cmd . ($python_venv ? ' (venv)' : ' (système)'));
+    
+    $cmd = 'cd ' . $path . ' && ' . $python_cmd . ' demond.py';
+    log::add('nhc', 'debug', 'Commande de base: ' . $cmd);
+    
+    $loglevel = log::convertLogLevel(log::getLogLevel('nhc'));
+    $cmd .= ' --loglevel ' . $loglevel;
+    log::add('nhc', 'debug', 'Log level: ' . $loglevel);
+    
+    $socketport = config::byKey('socketport', 'nhc', '55001');
+    $cmd .= ' --socketport ' . $socketport;
+    log::add('nhc', 'debug', 'Socket port: ' . $socketport);
+    
+    $callback = network::getNetworkAccess('internal', 'proto:127.0.0.1:port:comp') . '/plugins/nhc/core/php/jeedomCallback.php';
+    $cmd .= ' --callback ' . $callback;
+    log::add('nhc', 'debug', 'Callback: ' . $callback);
+    
+    $apikey = jeedom::getApiKey('nhc');
+    $cmd .= ' --apikey ' . $apikey;
+    log::add('nhc', 'debug', 'API key: ' . substr($apikey, 0, 10) . '...');
+    
+    $pid_file = jeedom::getTmpFolder('nhc') . '/demond.pid';
+    $cmd .= ' --pid ' . $pid_file;
+    log::add('nhc', 'debug', 'PID file: ' . $pid_file);
+    
+    // Paramètres spécifiques à Niko Home Control
+    $niko_ip = config::byKey('niko_ip', 'nhc', '');
+    $cmd .= ' --niko_ip ' . $niko_ip;
+    log::add('nhc', 'debug', 'Niko IP: ' . ($niko_ip ? $niko_ip : 'NON DÉFINI'));
+    
+    $niko_jwt = config::byKey('niko_jwt', 'nhc', '');
+    $cmd .= ' --niko_jwt ' . $niko_jwt;
+    log::add('nhc', 'debug', 'Niko JWT: ' . ($niko_jwt ? substr($niko_jwt, 0, 20) . '...' : 'NON DÉFINI'));
+    
     log::add('nhc', 'info', 'Lancement démon nhc : ' . $cmd);
-    exec($cmd . ' >> ' . log::getPathToLog('nhc') . ' 2>&1 &');
+    
+    $full_cmd = $cmd . ' >> ' . log::getPathToLog('nhc') . ' 2>&1 &';
+    log::add('nhc', 'debug', 'Exécution de la commande...');
+    exec($full_cmd);
+    
+    log::add('nhc', 'debug', 'Attente démarrage démon (max 30s)...');
     $i = 0;
     while ($i < 30) {
       $deamon_info = self::deamon_info();
+      log::add('nhc', 'debug', 'Tentative ' . ($i + 1) . '/30 - État: ' . $deamon_info['state']);
+      
       if ($deamon_info['state'] == 'ok') {
+        log::add('nhc', 'info', 'Démon démarré avec succès après ' . ($i + 1) . ' secondes');
         break;
       }
       sleep(1);
@@ -153,9 +210,11 @@ class nhc extends eqLogic {
     }
     if ($i >= 30) {
       log::add('nhc', 'error', __('Impossible de lancer le démon nhc, vérifiez le log', __FILE__), 'unableStartDeamon');
+      log::add('nhc', 'error', 'ÉCHEC: Démon non démarré après 30 secondes');
       return false;
     }
     message::removeAll('nhc', 'unableStartDeamon');
+    log::add('nhc', 'debug', '=== FIN deamon_start() - SUCCÈS ===');
     return true;
   }
 
@@ -163,14 +222,30 @@ class nhc extends eqLogic {
   * Permet d'arrêter le démon
   */
   public static function deamon_stop() {
+    log::add('nhc', 'debug', '=== DÉBUT deamon_stop() ===');
+    
     $pid_file = jeedom::getTmpFolder('nhc') . '/demond.pid';
+    log::add('nhc', 'debug', 'Fichier PID: ' . $pid_file);
+    
     if (file_exists($pid_file)) {
       $pid = intval(trim(file_get_contents($pid_file)));
+      log::add('nhc', 'debug', 'PID trouvé: ' . $pid . ', arrêt...');
       system::kill($pid);
+    } else {
+      log::add('nhc', 'debug', 'Fichier PID non trouvé');
     }
+    
+    log::add('nhc', 'debug', 'Arrêt de tous les processus demond.py...');
     system::kill('demond.py');
-    system::fuserk(config::byKey('socketport', 'nhc', '55001'));
+    
+    $socketport = config::byKey('socketport', 'nhc', '55001');
+    log::add('nhc', 'debug', 'Libération du port ' . $socketport . '...');
+    system::fuserk($socketport);
+    
+    log::add('nhc', 'debug', 'Attente 1 seconde...');
     sleep(1);
+    
+    log::add('nhc', 'debug', '=== FIN deamon_stop() ===');
   }
   
   /*
@@ -251,6 +326,110 @@ class nhc extends eqLogic {
   */
 
   /*     * **********************Getteur Setteur*************************** */
+
+  /*
+  * Permet de récupérer les informations sur les dépendances
+  */
+  public static function dependancy_info() {
+    log::add('nhc', 'debug', '=== DÉBUT dependancy_info() ===');
+    
+    $return = array();
+    $return['log'] = log::getPathToLog('nhc_update');
+    $return['progress_file'] = jeedom::getTmpFolder('nhc') . '/dependance';
+    
+    // Vérifier si l'installation est en cours
+    if (file_exists($return['progress_file'])) {
+      log::add('nhc', 'debug', 'Installation en cours');
+      $return['state'] = 'in_progress';
+      log::add('nhc', 'debug', '=== FIN dependancy_info() - EN COURS ===');
+      return $return;
+    }
+    
+    // Vérifier si les dépendances Python sont installées
+    log::add('nhc', 'debug', 'Vérification dépendances Python...');
+    
+    // Déterminer quel Python utiliser (environnement virtuel ou système)
+    $python_venv_path = dirname(__FILE__) . '/../../resources/python_venv/bin/python3';
+    $python_venv = file_exists($python_venv_path) ? $python_venv_path : false;
+    log::add('nhc', 'debug', 'Chemin venv: ' . $python_venv_path);
+    log::add('nhc', 'debug', 'Venv existe: ' . ($python_venv ? 'OUI' : 'NON'));
+    
+    if ($python_venv) {
+      $python_venv_real = realpath($python_venv_path);
+      log::add('nhc', 'debug', 'Venv pointe vers: ' . ($python_venv_real ? $python_venv_real : 'ERREUR'));
+    }
+    
+    $python_cmd = $python_venv ? $python_venv : 'python3';
+    log::add('nhc', 'debug', 'Python choisi: ' . $python_cmd);
+    
+    // Vérifier la présence de Python
+    if ($python_cmd === 'python3') {
+      log::add('nhc', 'debug', 'Utilisation Python système');
+      $python_check = shell_exec('which python3 2>/dev/null');
+      log::add('nhc', 'debug', 'which python3: ' . ($python_check ? trim($python_check) : 'VIDE'));
+      
+      if (empty(trim($python_check))) {
+        log::add('nhc', 'error', 'ÉCHEC: Python3 non trouvé sur le système');
+        $return['state'] = 'nok';
+        log::add('nhc', 'debug', '=== FIN dependancy_info() - ÉCHEC ===');
+        return $return;
+      }
+    } else {
+      log::add('nhc', 'debug', 'Utilisation environnement virtuel');
+      if (!file_exists($python_cmd)) {
+        log::add('nhc', 'error', 'ÉCHEC: Environnement virtuel Python non trouvé: ' . $python_cmd);
+        $return['state'] = 'nok';
+        log::add('nhc', 'debug', '=== FIN dependancy_info() - ÉCHEC ===');
+        return $return;
+      }
+      log::add('nhc', 'debug', 'Environnement virtuel trouvé');
+    }
+    
+    // Vérifier version Python
+    $python_version = shell_exec($python_cmd . ' --version 2>&1');
+    log::add('nhc', 'debug', 'Version Python: ' . trim($python_version));
+    
+    // Vérifier la présence du module paho-mqtt
+    log::add('nhc', 'debug', 'Test module paho-mqtt...');
+    $mqtt_check = shell_exec($python_cmd . ' -c "import paho.mqtt.client" 2>&1');
+    log::add('nhc', 'debug', 'Résultat paho-mqtt: ' . (empty(trim($mqtt_check)) ? 'OK' : 'ERREUR: ' . trim($mqtt_check)));
+    
+    if (!empty(trim($mqtt_check))) {
+      log::add('nhc', 'error', 'ÉCHEC: Module paho-mqtt manquant');
+      $return['state'] = 'nok';
+      log::add('nhc', 'debug', '=== FIN dependancy_info() - ÉCHEC ===');
+      return $return;
+    }
+    
+    // Vérifier la présence du module requests
+    log::add('nhc', 'debug', 'Test module requests...');
+    $requests_check = shell_exec($python_cmd . ' -c "import requests" 2>&1');
+    log::add('nhc', 'debug', 'Résultat requests: ' . (empty(trim($requests_check)) ? 'OK' : 'ERREUR: ' . trim($requests_check)));
+    
+    if (!empty(trim($requests_check))) {
+      log::add('nhc', 'error', 'ÉCHEC: Module requests manquant');
+      $return['state'] = 'nok';
+      log::add('nhc', 'debug', '=== FIN dependancy_info() - ÉCHEC ===');
+      return $return;
+    }
+    
+    $return['state'] = 'ok';
+    log::add('nhc', 'info', 'SUCCÈS: Toutes les dépendances sont OK');
+    log::add('nhc', 'debug', '=== FIN dependancy_info() - RÉSULTAT: OK ===');
+    
+    return $return;
+  }
+
+  /*
+  * Permet d'installer les dépendances
+  */
+  public static function dependancy_install() {
+    log::remove('nhc_update');
+    return array(
+      'script' => dirname(__FILE__) . '/../../resources/install_#stype#.sh ' . jeedom::getTmpFolder('nhc') . '/dependance', 
+      'log' => log::getPathToLog('nhc_update')
+    );
+  }
 }
 
 class nhcCmd extends cmd {

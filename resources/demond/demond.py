@@ -107,6 +107,7 @@ parser.add_argument("--loglevel", help="Log Level for the daemon", type=str)
 parser.add_argument("--callback", help="Callback", type=str)
 parser.add_argument("--apikey", help="Apikey", type=str)
 parser.add_argument("--pid", help="Pid file", type=str)
+parser.add_argument("--socketport", help="Socket Port", type=int)
 parser.add_argument("--niko_ip", help="Niko Gateway IP", type=str)
 parser.add_argument("--niko_jwt", help="Niko JWT Token", type=str)
 args = parser.parse_args()
@@ -127,6 +128,10 @@ if args.apikey:
 _callback = ""
 if args.callback:
     _callback = args.callback
+
+_socketport = 55001
+if args.socketport:
+    _socketport = args.socketport
 
 # On récupère l'IP et le Jeton passés en argument
 _niko_ip = ""
