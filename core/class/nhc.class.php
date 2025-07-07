@@ -69,6 +69,75 @@ class nhc extends eqLogic {
   * Fonction exécutée automatiquement tous les jours par Jeedom
   public static function cronDaily() {}
   */
+
+  /*
+  * Permet de récupérer les informations sur le démon
+  */
+  public static function deamon_info() {
+    $return = array();
+    $return['log'] = 'nhc';
+    $return['state'] = 'nok';
+    $pid_file = jeedom::getTmpFolder('nhc') . '/demond.pid';
+    if (file_exists($pid_file)) {
+      if (posix_getsid(trim(file_get_contents($pid_file)))) {
+        $return['state'] = 'ok';
+      } else {
+        shell_exec(system::getCmdSudo() . 'rm -rf ' . $pid_file . ' 2>&1 > /dev/null');
+      }
+    }
+    $return['launchable'] = 'ok';
+    return $return;
+  }
+
+  /*
+  * Permet de lancer le démon
+  */
+  public static function deamon_start() {
+    self::deamon_stop();
+    $deamon_info = self::deamon_info();
+    if ($deamon_info['launchable'] != 'ok') {
+      throw new Exception(__('Veuillez vérifier la configuration', __FILE__));
+    }
+    
+    $path = realpath(dirname(__FILE__) . '/../../resources/demond');
+    $cmd = 'cd ' . $path . ' && python3 demond.py';
+    $cmd .= ' --loglevel ' . log::convertLogLevel(log::getLogLevel('nhc'));
+    $cmd .= ' --socketport ' . config::byKey('socketport', 'nhc', '55001');
+    $cmd .= ' --callback ' . network::getNetworkAccess('internal', 'proto:127.0.0.1:port:comp') . '/plugins/nhc/core/php/jeedomCallback.php';
+    $cmd .= ' --apikey ' . jeedom::getApiKey('nhc');
+    $cmd .= ' --pid ' . jeedom::getTmpFolder('nhc') . '/demond.pid';
+    log::add('nhc', 'info', 'Lancement démon nhc : ' . $cmd);
+    exec($cmd . ' >> ' . log::getPathToLog('nhc') . ' 2>&1 &');
+    $i = 0;
+    while ($i < 30) {
+      $deamon_info = self::deamon_info();
+      if ($deamon_info['state'] == 'ok') {
+        break;
+      }
+      sleep(1);
+      $i++;
+    }
+    if ($i >= 30) {
+      log::add('nhc', 'error', __('Impossible de lancer le démon nhc, vérifiez le log', __FILE__), 'unableStartDeamon');
+      return false;
+    }
+    message::removeAll('nhc', 'unableStartDeamon');
+    return true;
+  }
+
+  /*
+  * Permet d'arrêter le démon
+  */
+  public static function deamon_stop() {
+    $pid_file = jeedom::getTmpFolder('nhc') . '/demond.pid';
+    if (file_exists($pid_file)) {
+      $pid = intval(trim(file_get_contents($pid_file)));
+      system::kill($pid);
+    }
+    system::kill('demond.py');
+    system::fuserk(config::byKey('socketport', 'nhc', '55001'));
+    sleep(1);
+  }
   
   /*
   * Permet de déclencher une action avant modification d'une variable de configuration du plugin
