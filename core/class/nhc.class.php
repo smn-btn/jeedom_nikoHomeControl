@@ -85,7 +85,41 @@ class nhc extends eqLogic {
         shell_exec(system::getCmdSudo() . 'rm -rf ' . $pid_file . ' 2>&1 > /dev/null');
       }
     }
+    
+    // Vérifier si les dépendances Python sont installées
+    $return['launchable'] = 'nok';
+    $return['launchable_message'] = '';
+    
+    // Vérifier la présence de Python3
+    $python_check = shell_exec('which python3 2>/dev/null');
+    if (empty(trim($python_check))) {
+      $return['launchable_message'] = 'Python3 non trouvé';
+      return $return;
+    }
+    
+    // Vérifier la présence du module paho-mqtt
+    $mqtt_check = shell_exec('python3 -c "import paho.mqtt.client" 2>&1');
+    if (!empty(trim($mqtt_check))) {
+      $return['launchable_message'] = 'Module paho-mqtt manquant. Installez avec: sudo apt install python3-paho-mqtt';
+      return $return;
+    }
+    
+    // Vérifier la présence du module requests
+    $requests_check = shell_exec('python3 -c "import requests" 2>&1');
+    if (!empty(trim($requests_check))) {
+      $return['launchable_message'] = 'Module requests manquant. Installez avec: sudo apt install python3-requests';
+      return $return;
+    }
+    
+    // Vérifier la présence du fichier démon
+    $demond_path = realpath(dirname(__FILE__) . '/../../resources/demond/demond.py');
+    if (!file_exists($demond_path)) {
+      $return['launchable_message'] = 'Fichier démon manquant: ' . $demond_path;
+      return $return;
+    }
+    
     $return['launchable'] = 'ok';
+    
     return $return;
   }
 
