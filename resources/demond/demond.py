@@ -26,6 +26,10 @@ import ssl
 # Cette partie charge les outils Jeedom pour Python
 from jeedom.jeedom import jeedom_socket, jeedom_utils, jeedom_com, JEEDOM_SOCKET_MESSAGE
 
+# Variables globales pour la communication
+jeedom_socket_instance = None
+jeedom_com_instance = None
+
 
 # --- FONCTIONS DE GESTION MQTT ---
 
@@ -51,10 +55,48 @@ def on_message(client, userdata, msg):
 # --- FONCTION PRINCIPALE DU DÉMON ---
 
 def listen():
+    logging.info("Démarrage du démon nhc...")
+    
+    # Initialisation de la communication avec Jeedom
+    global jeedom_socket_instance, jeedom_com_instance
+    
+    try:
+        # Démarrage du socket Jeedom pour recevoir les commandes
+        jeedom_socket_instance = jeedom_socket(port=_socketport, address='localhost')
+        jeedom_socket_instance.open()
+        
+        # Démarrage de la communication avec Jeedom
+        jeedom_com_instance = jeedom_com(apikey=_apikey, url=_callback, cycle=0.5)
+        if not jeedom_com_instance.test():
+            logging.error('Problème de communication réseau. Veuillez vérifier votre configuration réseau Jeedom.')
+            shutdown()
+            return
+            
+        logging.info("Communication avec Jeedom initialisée")
+        
+        # Démarrage du client MQTT si configuration disponible
+        if _niko_ip and _niko_jwt:
+            start_mqtt_client()
+        else:
+            logging.warning("Configuration Niko manquante, fonctionnement en mode dégradé")
+            
+        # Boucle principale du démon
+        while True:
+            time.sleep(0.5)
+            read_socket()
+            
+    except KeyboardInterrupt:
+        logging.info("Arrêt demandé par l'utilisateur")
+        shutdown()
+    except Exception as e:
+        logging.error("Erreur fatale: %s", e)
+        shutdown()
+
+def start_mqtt_client():
+    """Démarre le client MQTT en arrière-plan"""
     logging.info("Démarrage du client MQTT...")
     
     # Création d'un client MQTT
-    # Le client_id doit être unique, on en génère un aléatoire.
     client = mqtt.Client(client_id="jeedom_nhc_plugin_" + str(os.getpid()))
 
     # Assignation des fonctions de callback
@@ -62,27 +104,57 @@ def listen():
     client.on_message = on_message
 
     # Configuration de l'authentification
-    # Le mot de passe est le jeton JWT. [cite_start]Le nom d'utilisateur est fourni par Niko[cite: 137, 138].
     logging.info("Configuration de l'authentification avec l'utilisateur 'hobby'")
     client.username_pw_set("hobby", password=_niko_jwt)
     
     # Configuration de la connexion sécurisée (SSL/TLS)
-    # La passerelle Niko utilise un port sécurisé.
     logging.info("Configuration de la connexion sécurisée (TLS)")
-    # [cite_start]Note : pour une sécurité maximale, il faudrait utiliser le certificat CA fourni par Niko [cite: 93]
-    # Pour commencer, nous ignorons la vérification du certificat, ce qui est plus simple.
     client.tls_set(cert_reqs=ssl.CERT_NONE)
     client.tls_insecure_set(True)
 
     try:
         logging.info("Tentative de connexion à %s sur le port 8884...", _niko_ip)
         client.connect(_niko_ip, 8884, 60)
-        # client.loop_forever() est bloquant, il garde le script en vie
-        # et gère la reconnexion automatiquement.
-        client.loop_forever()
+        # Utilisation du mode non-bloquant
+        client.loop_start()
+        logging.info("Client MQTT démarré en arrière-plan")
     except Exception as e:
-        logging.error("Erreur fatale lors de la connexion ou dans la boucle MQTT: %s", e)
-        shutdown()
+        logging.error("Erreur lors de la connexion MQTT: %s", e)
+        logging.warning("Continuons en mode dégradé sans MQTT")
+
+def read_socket():
+    """Lit les messages du socket Jeedom"""
+    try:
+        if not JEEDOM_SOCKET_MESSAGE.empty():
+            logging.debug("Message reçu du socket Jeedom")
+            message = json.loads(jeedom_utils.stripped(JEEDOM_SOCKET_MESSAGE.get()))
+            if message['apikey'] != _apikey:
+                logging.error("Clé API invalide reçue du socket: %s", message)
+                return
+            
+            # Traitement du message
+            if 'action' in message:
+                handle_jeedom_command(message)
+            else:
+                logging.debug("Message sans action: %s", message)
+                
+    except Exception as e:
+        logging.error('Erreur lors de la lecture du socket: %s', e)
+
+def handle_jeedom_command(message):
+    """Traite les commandes reçues de Jeedom"""
+    action = message.get('action')
+    logging.debug("Commande reçue: %s", action)
+    
+    if action == 'test':
+        logging.info("Test de communication reçu")
+        # Répondre à Jeedom
+        jeedom_com_instance.send_change_immediate({'action': 'test_response', 'status': 'ok'})
+    elif action == 'refresh':
+        logging.info("Demande de rafraîchissement reçue")
+        # Ici on pourrait déclencher une synchronisation
+    else:
+        logging.warning("Action non reconnue: %s", action)
 
 # --- GESTION DU DÉMON (Code standard Jeedom) ---
 
@@ -97,6 +169,14 @@ def shutdown():
         os.remove(_pidfile)
     except Exception as e:
         logging.warning('Error removing PID file: %s', e)
+        
+    # Fermeture du socket Jeedom
+    try:
+        if jeedom_socket_instance:
+            jeedom_socket_instance.close()
+    except Exception as e:
+        logging.warning('Error closing socket: %s', e)
+        
     logging.debug("Exit 0")
     sys.stdout.flush()
     os._exit(0)
@@ -145,15 +225,25 @@ if args.niko_jwt:
 # Configuration des logs
 jeedom_utils.set_log_level(_log_level)
 
-# Vérification des paramètres essentiels
-if not _niko_ip or not _niko_jwt:
-    logging.error("L'adresse IP de la passerelle Niko ou le Jeton JWT ne sont pas configurés. Arrêt du démon.")
-    exit()
-    
 logging.info('Démarrage du démon nhc')
 logging.info('Log level : %s', _log_level)
 logging.info('PID file : %s', _pidfile)
-logging.info('IP Passerelle : %s', _niko_ip)
+logging.info('Socket port : %s', _socketport)
+logging.info('Callback : %s', _callback)
+logging.info('IP Passerelle : %s', _niko_ip if _niko_ip else 'Non configurée')
+
+# Vérification des paramètres essentiels pour Jeedom
+if not _apikey:
+    logging.error("Clé API manquante. Arrêt du démon.")
+    sys.exit(1)
+
+if not _callback:
+    logging.error("URL de callback manquante. Arrêt du démon.")
+    sys.exit(1)
+
+# Avertissement si la configuration Niko n'est pas complète
+if not _niko_ip or not _niko_jwt:
+    logging.warning("Configuration Niko incomplète. Le démon fonctionnera en mode dégradé.")
 
 # Gestion des signaux d'arrêt
 signal.signal(signal.SIGINT, handler)
