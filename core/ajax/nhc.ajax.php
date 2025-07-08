@@ -29,6 +29,43 @@ try {
   */
     ajax::init();
 
+    if (init('action') == 'testConnection') {
+        $niko_ip = init('niko_ip');
+        $niko_jwt = init('niko_jwt');
+        
+        if (empty($niko_ip)) {
+            throw new Exception(__('Adresse IP manquante', __FILE__));
+        }
+        
+        if (empty($niko_jwt)) {
+            throw new Exception(__('Token JWT manquant', __FILE__));
+        }
+        
+        // Test de connexion à la passerelle Niko
+        $test_result = nhc::testNikoConnection($niko_ip, $niko_jwt);
+        ajax::success($test_result);
+    }
+
+    if (init('action') == 'discoverDevices') {
+        // Déclencher la découverte d'équipements via le démon
+        $result = nhc::discoverDevices();
+        ajax::success($result);
+    }
+
+    if (init('action') == 'getDaemonInfo') {
+        $info = nhc::deamon_info();
+        ajax::success($info);
+    }
+
+    if (init('action') == 'sendCommand') {
+        $device_id = init('device_id');
+        $command = init('command');
+        $value = init('value');
+        
+        $result = nhc::sendCommand($device_id, $command, $value);
+        ajax::success($result);
+    }
+
 
 
     throw new Exception(__('Aucune méthode correspondante à', __FILE__) . ' : ' . init('action'));

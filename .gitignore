@@ -13,4 +13,19 @@ docs/.sass-cache/
 .remote-sync.json
 .vscode
 
+# Environnement virtuel Python
+.venv/
+venv/
+env/
+
+# Fichiers de test temporaires
+test_*.php
+test_*.py
+
+# Logs et fichiers temporaires
+*.log
+*.pid
+__pycache__/
+*.pyc
+
 docker-jeedom

@@ -168,7 +168,7 @@ class nhc extends eqLogic {
     $cmd .= ' --socketport ' . $socketport;
     log::add('nhc', 'debug', 'Socket port: ' . $socketport);
     
-    $callback = network::getNetworkAccess('internal', 'proto:127.0.0.1:port:comp') . '/plugins/nhc/core/php/jeedomCallback.php';
+    $callback = network::getNetworkAccess('internal') . '/plugins/nhc/core/php/jeedomCallback.php';
     $cmd .= ' --callback ' . $callback;
     log::add('nhc', 'debug', 'Callback: ' . $callback);
     
