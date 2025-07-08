@@ -409,7 +409,7 @@ class nhc extends eqLogic {
     return $return;
   }
 
-  /*
+ /*
   * Permet d'installer les dépendances
   */
   public static function dependancy_install() {
@@ -419,6 +419,161 @@ class nhc extends eqLogic {
       'log' => log::getPathToLog('nhc_update')
     );
   }
+
+ /*
+  * Permet de découvrir les appareils via MQTT Niko Home Control
+  */
+  public static function discoverDevices() {
+        log::add('nhc', 'debug', '=== DÉBUT discoverDevices() via MQTT ===');
+        
+        // Vérification de la configuration
+        $niko_ip = config::byKey('niko_ip', 'nhc', '');
+        if (empty($niko_ip)) {
+            log::add('nhc', 'error', 'Configuration Niko IP manquante');
+            return array('error' => 'Configuration Niko IP manquante');
+        }
+        
+        // Utiliser le démon Python pour la communication MQTT
+        $socketport = config::byKey('socketport', 'nhc', '55001');
+        log::add('nhc', 'debug', 'Connexion au démon sur le port : ' . $socketport);
+        
+        // Vérifier que le démon est actif
+        $deamon_info = self::deamon_info();
+        if ($deamon_info['state'] != 'ok') {
+            log::add('nhc', 'error', 'Le démon nhc n\'est pas actif, impossible de découvrir via MQTT');
+            return array('error' => 'Démon nhc non actif');
+        }
+        
+        try {
+            // Connexion socket au démon Python
+            $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+            if ($socket === false) {
+                throw new Exception('Impossible de créer le socket : ' . socket_strerror(socket_last_error()));
+            }
+            
+            socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, array('sec' => 40, 'usec' => 0));
+            socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, array('sec' => 5, 'usec' => 0));
+            
+            $result = socket_connect($socket, '127.0.0.1', intval($socketport));
+            if ($result === false) {
+                throw new Exception('Impossible de se connecter au démon : ' . socket_strerror(socket_last_error($socket)));
+            }
+            
+            // Envoyer la commande de découverte au démon avec l'API key
+            $apikey = jeedom::getApiKey('nhc');
+            $command = json_encode(array(
+                'apikey' => $apikey,
+                'action' => 'discover_devices'
+            ));
+            
+            log::add('nhc', 'debug', 'Envoi commande découverte MQTT');
+            $sent = socket_write($socket, $command . "\n");
+            if ($sent === false) {
+                throw new Exception('Erreur envoi commande : ' . socket_strerror(socket_last_error($socket)));
+            }
+            
+            // Attendre la réponse complète
+            $response = '';
+            $timeout = time() + 35; // 35 secondes de timeout
+            $socket_error_count = 0;
+            while (time() < $timeout) {
+                $data = socket_read($socket, 4096, PHP_NORMAL_READ);
+                if ($data === false) {
+                    $error = socket_strerror(socket_last_error($socket));
+                    log::add('nhc', 'error', 'Erreur lecture socket (discoverDevices): ' . $error);
+                    $socket_error_count++;
+                    if ($socket_error_count > 3 || $error !== 'Success') {
+                        throw new Exception('Erreur lecture socket : ' . $error);
+                    }
+                    usleep(100000); // Attendre 100ms
+                    continue;
+                }
+                if ($data === '') {
+                    usleep(100000); // Attendre 100ms
+                    continue;
+                }
+                $response .= $data;
+                // Vérifier si on a reçu une réponse JSON complète
+                $lines = explode("\n", trim($response));
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (!empty($line)) {
+                        $decoded = json_decode($line, true);
+                        if ($decoded !== null && isset($decoded['action']) && $decoded['action'] === 'discover_devices_response') {
+                            socket_close($socket);
+                            if (isset($decoded['devices'])) {
+                                log::add('nhc', 'info', 'Découverte MQTT réussie : ' . $decoded['count'] . ' appareils trouvés');
+                                log::add('nhc', 'debug', 'Appareils découverts : ' . print_r($decoded['devices'], true));
+                                return $decoded['devices'];
+                            } else {
+                                log::add('nhc', 'warning', 'Réponse découverte sans appareils');
+                                return array();
+                            }
+                        } elseif ($decoded === null) {
+                            log::add('nhc', 'error', 'Réponse non JSON ou incomplète : ' . $line);
+                        }
+                    }
+                }
+            }
+            socket_close($socket);
+            if (empty($response)) {
+                log::add('nhc', 'error', 'Aucune réponse du démon MQTT dans les temps (discoverDevices)');
+                return array('error' => 'Timeout de découverte MQTT');
+            }
+            log::add('nhc', 'error', 'Réponse MQTT invalide ou incomplète (discoverDevices) : ' . $response);
+            return array('error' => 'Réponse MQTT invalide');
+            
+        } catch (Exception $e) {
+            if (isset($socket) && is_resource($socket)) {
+                socket_close($socket);
+            }
+            log::add('nhc', 'error', 'Erreur lors de la découverte MQTT : ' . $e->getMessage());
+            return array('error' => 'Erreur découverte MQTT : ' . $e->getMessage());
+        }
+    }
+
+    /*
+    * Gère la réception d'un message MQTT pour la mise à jour temps réel des équipements
+    */
+    public static function handleMqttMessage($topic, $data) {
+        log::add('nhc', 'debug', 'Traitement mqtt_message sur topic: ' . $topic . ' | data: ' . print_r($data, true));
+        if (!isset($data['Params'][0]['Devices']) || !is_array($data['Params'][0]['Devices'])) {
+            log::add('nhc', 'warning', 'Aucun device à traiter dans mqtt_message');
+            return;
+        }
+        foreach ($data['Params'][0]['Devices'] as $device) {
+            if (!isset($device['Uuid'])) continue;
+            $uuid = $device['Uuid'];
+            $eqLogic = eqLogic::byTypeAndSearhConfiguration('nhc', 'uuid', $uuid, '1');
+            if (is_array($eqLogic) && count($eqLogic) > 0) {
+                $eqLogic = $eqLogic[0];
+                log::add('nhc', 'debug', 'Mise à jour de l\'équipement Jeedom pour Uuid: ' . $uuid . ' (ID: ' . $eqLogic->getId() . ')');
+                // Mise à jour de l'état Online si présent
+                if (isset($device['Online'])) {
+                    $cmd = $eqLogic->getCmd(null, 'online');
+                    if (is_object($cmd)) {
+                        $cmd->event($device['Online'] === 'True' ? 1 : 0);
+                        log::add('nhc', 'debug', 'Mise à jour cmd online: ' . $device['Online']);
+                    }
+                }
+                // Mise à jour des propriétés si présentes
+                if (isset($device['Properties']) && is_array($device['Properties'])) {
+                    foreach ($device['Properties'] as $prop) {
+                        foreach ($prop as $key => $value) {
+                            $cmd = $eqLogic->getCmd(null, strtolower($key));
+                            if (is_object($cmd)) {
+                                $cmd->event($value);
+                                log::add('nhc', 'debug', 'Mise à jour cmd ' . strtolower($key) . ': ' . $value);
+                            }
+                        }
+                    }
+                }
+            } else {
+                log::add('nhc', 'debug', 'Aucun équipement Jeedom trouvé pour Uuid: ' . $uuid);
+            }
+        }
+    }
+
 }
 
 class nhcCmd extends cmd {

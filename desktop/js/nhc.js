@@ -85,3 +85,24 @@ function addCmdToTable(_cmd) {
     }
   })
 }
+
+$('#bt_scanNikoDevices').on('click', function () {
+  $.ajax({
+    type: 'POST',
+    url: 'plugins/nhc/core/ajax/nhc.ajax.php',
+    data: {
+      action: 'discoverDevices'
+    },
+    dataType: 'json',
+    error: function (request, status, error) {
+      $('#div_alert').showAlert({ message: 'Erreur lors du scan des équipements Niko : ' + error, level: 'danger' });
+    },
+    success: function (data) {
+      if (data.state !== 'ok') {
+        $('#div_alert').showAlert({ message: 'Erreur lors du scan : ' + data.result, level: 'danger' });
+      } else {
+        $('#div_alert').showAlert({ message: 'Scan terminé. Résultat : ' + JSON.stringify(data.result), level: 'success' });
+      }
+    }
+  });
+});

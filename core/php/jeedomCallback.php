@@ -65,6 +65,16 @@ try {
                 }
                 break;
                 
+            case 'mqtt_message':
+                // Traitement des messages MQTT pour mise à jour temps réel
+                if (isset($result['topic']) && isset($result['data'])) {
+                    require_once dirname(__FILE__) . '/../class/nhc.class.php';
+                    nhc::handleMqttMessage($result['topic'], $result['data']);
+                } else {
+                    log::add('nhc', 'warning', 'mqtt_message reçu sans topic ou data');
+                }
+                break;
+                
             default:
                 log::add('nhc', 'debug', 'Action non gérée: ' . $result['action']);
                 break;

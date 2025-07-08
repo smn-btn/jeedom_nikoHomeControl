@@ -172,27 +172,55 @@ def handle_device_event(topic, data):
         logging.error("❌ Erreur traitement événement: %s", e)
 
 def handle_command_response(topic, data):
-    """Traite une réponse à une commande"""
-    logging.info("📋 Réponse commande: %s", data)
+    """Traite une réponse à une commande sur hobby/control/devices/rsp"""
+    logging.info("📋 Réponse reçue sur %s: %s", topic, data)
     
     try:
-        # Vérifier si la commande a réussi
-        if 'Error' in data or 'error' in data:
-            error_msg = data.get('Error') or data.get('error')
-            logging.warning("⚠️  Erreur commande: %s", error_msg)
+        method = data.get('Method', '')
+        
+        if method == 'devices.list':
+            # Réponse à une demande de liste d'appareils
+            logging.info("📋 Réponse devices.list reçue")
+            params = data.get('Params', {})
+            devices = params.get('Devices', [])
             
+            logging.info("📊 Nombre d'appareils dans la liste: %d", len(devices))
+            
+            # Envoyer la liste à Jeedom
             jeedom_com_instance.send_change_immediate({
-                'action': 'command_response',
-                'status': 'error',
-                'error': error_msg,
+                'action': 'devices_list_received',
+                'devices': devices,
+                'count': len(devices),
                 'raw_data': data
             })
+            
+        elif method == 'devices.control':
+            # Réponse à une commande de contrôle
+            if 'Error' in data or 'error' in data:
+                error_msg = data.get('Error') or data.get('error')
+                logging.warning("⚠️ Erreur commande de contrôle: %s", error_msg)
+                
+                jeedom_com_instance.send_change_immediate({
+                    'action': 'command_response',
+                    'status': 'error',
+                    'error': error_msg,
+                    'raw_data': data
+                })
+            else:
+                logging.info("✅ Commande de contrôle exécutée avec succès")
+                
+                jeedom_com_instance.send_change_immediate({
+                    'action': 'command_response',
+                    'status': 'success',
+                    'raw_data': data
+                })
         else:
-            logging.info("✅ Commande exécutée avec succès")
+            # Autre type de réponse
+            logging.debug("🔄 Réponse non traitée (méthode: %s)", method)
             
             jeedom_com_instance.send_change_immediate({
                 'action': 'command_response',
-                'status': 'success',
+                'method': method,
                 'raw_data': data
             })
             
@@ -320,9 +348,9 @@ def start_mqtt_client():
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         
-        mqtt_client_instance.tls_set_context(context)
+        # mqtt_client_instance.tls_set_context(context)
         # Alternative pour plus de compatibilité
-        # mqtt_client_instance.tls_set(cert_reqs=ssl.CERT_NONE)
+        mqtt_client_instance.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2, cert_reqs=ssl.CERT_NONE)
         # mqtt_client_instance.tls_insecure_set(True)
 
         # Tentative de connexion
@@ -346,33 +374,44 @@ def read_socket():
     try:
         # Vérifier que le socket existe avant d'essayer de lire
         if jeedom_socket_instance is None:
+            logging.debug("[read_socket] Aucun socket Jeedom ouvert, sortie de la fonction.")
             return
-            
         if not JEEDOM_SOCKET_MESSAGE.empty():
-            logging.debug("Message reçu du socket Jeedom")
+            logging.debug("[read_socket] Message détecté dans la file JEEDOM_SOCKET_MESSAGE.")
             raw_message = JEEDOM_SOCKET_MESSAGE.get()
-            
+            logging.debug(f"[read_socket] Message brut reçu: {repr(raw_message)} (type: {type(raw_message)})")
             # S'assurer que le message est une chaîne
             if isinstance(raw_message, bytes):
                 raw_message = raw_message.decode('utf-8')
+                logging.debug(f"[read_socket] Message décodé depuis bytes: {raw_message}")
             elif not isinstance(raw_message, str):
                 raw_message = str(raw_message)
-                
-            message = json.loads(jeedom_utils.stripped(raw_message))
-            
-            if message['apikey'] != _apikey:
-                logging.error("Clé API invalide reçue du socket: %s", message)
+                logging.debug(f"[read_socket] Message converti en str: {raw_message}")
+            # Diagnostic sur le stripping
+            stripped_message = jeedom_utils.stripped(raw_message)
+            logging.debug(f"[read_socket] Message après jeedom_utils.stripped: {repr(stripped_message)}")
+            if not stripped_message:
+                logging.warning("[read_socket] ATTENTION: jeedom_utils.stripped a retourné une chaîne vide, tentative de parsing direct du message brut.")
+                stripped_message = raw_message
+            try:
+                message = json.loads(stripped_message)
+                logging.debug(f"[read_socket] Message JSON décodé: {message}")
+            except Exception as e_json:
+                logging.error(f"[read_socket] Erreur de décodage JSON: {e_json}")
+                logging.error(f"[read_socket] Message problématique (après strip): {stripped_message}")
                 return
-            
+            if message['apikey'] != _apikey:
+                logging.error("[read_socket] Clé API invalide reçue du socket: %s", message)
+                return
             # Traitement du message
             if 'action' in message:
+                logging.debug(f"[read_socket] Action détectée: {message['action']}")
                 handle_jeedom_command(message)
             else:
-                logging.debug("Message sans action: %s", message)
-                
+                logging.debug("[read_socket] Message sans action: %s", message)
     except Exception as e:
-        logging.error('Erreur lors de la lecture du socket: %s', e)
-        logging.debug('Type de message problématique: %s', type(raw_message) if 'raw_message' in locals() else 'N/A')
+        logging.error('[read_socket] Erreur lors de la lecture du socket: %s', e)
+        logging.debug('[read_socket] Type de message problématique: %s', type(raw_message) if 'raw_message' in locals() else 'N/A')
 
 def handle_jeedom_command(message):
     """Traite les commandes reçues de Jeedom"""
@@ -387,8 +426,23 @@ def handle_jeedom_command(message):
         logging.info("Test de connexion Niko demandé")
         test_niko_connection(message.get('ip'), message.get('jwt'))
     elif action == 'discover_devices':
-        logging.info("Découverte d'équipements demandée")
-        discover_niko_devices()
+        logging.info("Découverte d'équipements demandée via MQTT")
+        try:
+            devices = discover_niko_devices_mqtt()
+            # Toujours renvoyer une réponse JSON, même si la liste est vide
+            jeedom_com_instance.send_change_immediate({
+                'action': 'discover_devices_response',
+                'devices': devices,
+                'count': len(devices)
+            })
+        except Exception as e:
+            logging.error("Erreur lors de la découverte MQTT : %s", e)
+            jeedom_com_instance.send_change_immediate({
+                'action': 'discover_devices_response',
+                'devices': [],
+                'count': 0,
+                'error': str(e)
+            })
     elif action == 'send_command':
         logging.info("Commande à envoyer: %s", message)
         send_niko_command(message.get('device_id'), message.get('command'), message.get('value'))
@@ -741,6 +795,189 @@ def get_device_status(device_id):
         logging.error("❌ Erreur récupération état: %s", e)
         return None
 
+def discover_niko_devices_mqtt():
+    """Découvre les équipements Niko via MQTT selon la documentation officielle"""
+    logging.info("🔍 Découverte des équipements Niko via MQTT...")
+    
+    if not mqtt_client_instance or not mqtt_client_instance.is_connected():
+        logging.error("❌ Client MQTT non connecté pour la découverte")
+        return []
+    
+    try:
+        # Variables pour la découverte
+        discovered_devices = []
+        discovery_complete = False
+        discovery_timeout = 10  # 10 secondes devrait suffire pour la réponse
+        start_time = time.time()
+        
+        logging.info("📡 Envoi de la commande devices.list et attente de la réponse...")
+        
+        # Fonction callback temporaire pour capturer la réponse devices.list
+        def discovery_callback(client, userdata, msg):
+            nonlocal discovered_devices, discovery_complete
+            
+            try:
+                topic = msg.topic
+                payload = msg.payload.decode('utf-8')
+                logging.debug("📨 Message reçu sur [%s]: %s", topic, payload[:200] + "..." if len(payload) > 200 else payload)
+                
+                # Traiter seulement les réponses sur le topic rsp
+                if topic == "hobby/control/devices/rsp":
+                    try:
+                        data = json.loads(payload)
+                        
+                        # Vérifier que c'est bien la réponse à devices.list
+                        if data.get('Method') == 'devices.list':
+                            logging.info("✅ Réponse devices.list reçue!")
+                            
+                            # Parser les appareils de la réponse
+                            params = data.get('Params', {})
+                            if isinstance(params, list) and len(params) > 0:
+                                devices_data = params[0].get('Devices', [])
+                            elif isinstance(params, dict):
+                                devices_data = params.get('Devices', [])
+                            else:
+                                devices_data = []
+                            
+                            logging.info("📊 Nombre d'appareils dans la réponse: %d", len(devices_data))
+                            
+                            for device_data in devices_data:
+                                device_info = parse_device_from_list_response(device_data)
+                                if device_info:
+                                    discovered_devices.append(device_info)
+                                    logging.debug("📱 Appareil extrait: %s (%s)", device_info['name'], device_info['id'])
+                            
+                            discovery_complete = True
+                            
+                    except json.JSONDecodeError as e:
+                        logging.warning("⚠️ Erreur parsing JSON: %s", e)
+                        
+            except Exception as e:
+                logging.debug("Erreur lors du traitement du message de découverte: %s", e)
+        
+        # Sauvegarder l'ancien callback et installer le nouveau
+        old_callback = mqtt_client_instance.on_message
+        mqtt_client_instance.on_message = discovery_callback
+        
+        # Envoyer la commande devices.list
+        request_all_device_status()
+        
+        # Attendre la réponse
+        while not discovery_complete and time.time() - start_time < discovery_timeout:
+            time.sleep(0.1)
+            
+        # Restaurer l'ancien callback
+        mqtt_client_instance.on_message = old_callback
+        
+        if discovery_complete:
+            logging.info("✅ Découverte MQTT terminée avec succès: %d appareils trouvés", len(discovered_devices))
+        else:
+            logging.warning("⚠️ Timeout de découverte MQTT atteint")
+        
+        return discovered_devices
+        
+    except Exception as e:
+        logging.error("❌ Erreur lors de la découverte MQTT: %s", e)
+        return []
+
+def parse_mqtt_device_info(topic, data):
+    """Parse les informations d'un appareil depuis un message MQTT"""
+    try:
+        # Extraire l'ID de l'appareil du topic
+        # Format attendu: hobby/control/devices/evt/[device_id]
+        topic_parts = topic.split('/')
+        if len(topic_parts) >= 5:
+            device_id = topic_parts[4]
+        else:
+            device_id = extract_device_id(topic, data)
+            
+        if not device_id:
+            return None
+            
+        # Extraire les informations de l'appareil
+        device_info = {
+            'id': device_id,
+            'name': data.get('Name') or f"Device_{device_id}",
+            'type': data.get('Type') or 'unknown',
+            'uuid': data.get('Uuid') or device_id,
+            'location': data.get('Location') or '',
+            'properties': data.get('Properties') or [],
+            'last_seen': time.time()
+        }
+        
+        return device_info
+        
+    except Exception as e:
+        logging.debug("Erreur lors du parsing des infos MQTT: %s", e)
+        return None
+
+def request_all_device_status():
+    """Demande la liste de tous les appareils via MQTT selon la doc officielle"""
+    try:
+        if not mqtt_client_instance or not mqtt_client_instance.is_connected():
+            return
+            
+        # Message correct selon la documentation Niko
+        request_msg = {
+            "Method": "devices.list"
+        }
+        
+        logging.info("📡 Demande de la liste des appareils via MQTT...")
+        logging.debug("📝 Message envoyé: %s", request_msg)
+        
+        result = mqtt_client_instance.publish(
+            "hobby/control/devices/cmd", 
+            json.dumps(request_msg), 
+            qos=1
+        )
+        
+        if result.rc == mqtt.MQTT_ERR_SUCCESS:
+            logging.debug("✅ Commande devices.list envoyée sur hobby/control/devices/cmd")
+        else:
+            logging.warning("⚠️ Échec envoi commande devices.list: %s", result.rc)
+            
+    except Exception as e:
+        logging.error("❌ Erreur lors de la demande de liste des appareils: %s", e)
+
+def parse_device_from_list_response(device_data):
+    """Parse les informations d'un appareil depuis la réponse devices.list"""
+    try:
+        if not isinstance(device_data, dict):
+            return None
+            
+        # Extraire les informations selon la structure Niko
+        device_id = device_data.get('Uuid') or device_data.get('uuid')
+        device_name = device_data.get('Name') or device_data.get('name') or f"Device_{device_id}"
+        device_type = device_data.get('Type') or device_data.get('type') or 'unknown'
+        location = device_data.get('Location') or device_data.get('location') or ''
+        properties = device_data.get('Properties') or device_data.get('properties') or []
+        
+        if not device_id:
+            logging.debug("⚠️ Appareil sans UUID ignoré: %s", device_data)
+            return None
+            
+        # Déterminer le type d'équipement plus précisément
+        refined_type = determine_device_type(device_data)
+        
+        device_info = {
+            'id': device_id,
+            'name': device_name,
+            'type': refined_type,
+            'uuid': device_id,
+            'location': location,
+            'properties': properties,
+            'raw_data': device_data,
+            'discovery_method': 'mqtt_devices_list'
+        }
+        
+        logging.debug("🔧 Appareil parsé: %s (%s) - Type: %s", device_name, device_id, refined_type)
+        return device_info
+        
+    except Exception as e:
+        logging.error("❌ Erreur lors du parsing de l'appareil: %s", e)
+        logging.debug("Données problématiques: %s", device_data)
+        return None
+
 # --- GESTION DU DÉMON (Code standard Jeedom) ---
 
 def handler(signum=None, frame=None):
@@ -748,33 +985,33 @@ def handler(signum=None, frame=None):
     shutdown()
 
 def shutdown():
-    logging.info("🛑 Arrêt du démon...")
+    logging.info("🛑 Shutdown")
     
     # Fermeture du client MQTT
     try:
         if mqtt_client_instance:
-            logging.info("🔌 Fermeture connexion MQTT...")
+            logging.debug("Closing MQTT client...")
             mqtt_client_instance.loop_stop()
             mqtt_client_instance.disconnect()
     except Exception as e:
-        logging.warning('Erreur fermeture MQTT: %s', e)
+        logging.warning('Error closing MQTT client: %s', e)
     
     # Suppression du fichier PID
-    logging.debug("🗑️  Suppression fichier PID: %s", _pidfile)
+    logging.debug("Removing PID file: %s", _pidfile)
     try:
         os.remove(_pidfile)
     except Exception as e:
-        logging.warning('Erreur suppression PID: %s', e)
+        logging.warning('Error removing PID file: %s', e)
         
     # Fermeture du socket Jeedom
     try:
         if jeedom_socket_instance:
-            logging.info("🔌 Fermeture socket Jeedom...")
+            logging.debug("Closing Jeedom socket...")
             jeedom_socket_instance.close()
     except Exception as e:
-        logging.warning('Erreur fermeture socket: %s', e)
+        logging.warning('Error closing Jeedom socket: %s', e)
         
-    logging.info("✅ Arrêt terminé")
+    logging.debug("Exit 0")
     sys.stdout.flush()
     os._exit(0)
 
@@ -822,12 +1059,14 @@ if args.niko_jwt:
 # Configuration des logs
 jeedom_utils.set_log_level(_log_level)
 
-logging.info('Démarrage du démon nhc')
+logging.info('Start nhc daemon')
 logging.info('Log level : %s', _log_level)
-logging.info('PID file : %s', _pidfile)
 logging.info('Socket port : %s', _socketport)
+logging.info('PID file : %s', _pidfile)
 logging.info('Callback : %s', _callback)
-logging.info('IP Passerelle : %s', _niko_ip if _niko_ip else 'Non configurée')
+logging.info('API key : %s...', _apikey[:10] if _apikey else 'NON DÉFINI')
+logging.info('Niko Gateway IP : %s', _niko_ip if _niko_ip else 'NON CONFIGURÉ')
+logging.info('Niko JWT Token : %s...', _niko_jwt[:20] if _niko_jwt else 'NON CONFIGURÉ')
 
 # Vérification des paramètres essentiels pour Jeedom
 if not _apikey:
