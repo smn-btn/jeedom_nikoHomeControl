@@ -75,6 +75,20 @@ try {
                 }
                 break;
                 
+            case 'discover_devices_response':
+                // Réponse à la découverte d'équipements (liste complète)
+                if (isset($result['devices']) && is_array($result['devices'])) {
+                    log::add('nhc', 'info', 'Liste des équipements découverts reçue : ' . count($result['devices']) . ' équipements');
+                    // TODO Ici, vous pouvez traiter la liste complète (création, affichage, etc.)
+                    // Exemple :
+                    // foreach ($result['devices'] as $device) {
+                    //     log::add('nhc', 'debug', 'Équipement : ' . print_r($device, true));
+                    // }
+                } else {
+                    log::add('nhc', 'warning', 'discover_devices_response sans liste d\'équipements');
+                }
+                break;
+                
             default:
                 log::add('nhc', 'debug', 'Action non gérée: ' . $result['action']);
                 break;
