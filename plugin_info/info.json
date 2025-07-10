@@ -49,7 +49,7 @@
     "category": "home automation protocol",
     "hasDependency": true,
     "hasOwnDeamon": true,
-    "maxDependancyInstallTime": 0,
+    "maxDependancyInstallTime": 10,
     "changelog_beta": "https://doc.jeedom.com/#language#/plugins/programming/nhc/beta/changelog",
     "changelog": "https://doc.jeedom.com/#language#/plugins/programming/nhc/changelog",
     "documentation_beta": "https://doc.jeedom.com/#language#/plugins/programming/nhc/beta",

@@ -24,6 +24,11 @@ $eqLogics = eqLogic::byType($plugin->getId());
 				<br>
 				<span>{{Configuration}}</span>
 			</div>
+			<div class="cursor eqLogicAction logoTertiary" id="bt_scanNikoDevices">
+				<i class="fas fa-search"></i>
+				<br>
+				<span>{{Scan}}</span>
+			</div>
 		</div>
 		<legend><i class="fas fa-table"></i> {{Mes nhcs}}</legend>
 		<?php
