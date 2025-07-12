@@ -939,9 +939,6 @@ def parse_device_from_list_response(device_data):
             logging.debug("⚠️ Appareil sans UUID ignoré: %s", device_data)
             return None
         refined_type = determine_device_type(device_data)
-        # Filtrer uniquement smartmotor ou energyhome
-        if refined_type not in ["smartmotor", "energyhome"]:
-            return None
         device_info = {
             'id': device_id,
             'name': device_name,
