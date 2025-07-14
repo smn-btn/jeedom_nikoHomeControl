@@ -477,7 +477,7 @@ class nhc extends eqLogic {
             $timeout = time() + 35; // 35 secondes de timeout
             $socket_error_count = 0;
             while (time() < $timeout) {
-                $data = socket_read($socket, 4096, PHP_NORMAL_READ);
+                $data = socket_read($socket, 4096, PHP_BINARY_READ);
                 if ($data === false) {
                     $error = socket_strerror(socket_last_error($socket));
                     log::add('nhc', 'error', 'Erreur lecture socket (discoverDevices): ' . $error);
@@ -488,7 +488,7 @@ class nhc extends eqLogic {
                     usleep(100000); // Attendre 100ms
                     continue;
                 }
-                if ($data === '') {
+                if ($data === '' || $data === "\0") {
                     usleep(100000); // Attendre 100ms
                     continue;
                 }

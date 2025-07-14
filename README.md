@@ -23,3 +23,6 @@ Un assistant en CLI vous posera quelques questions, (l'id du plugin, la catégor
 Voila, votre plugin est basiquement prêt pour coder votre travail.
 
 
+## Types d'équipement Niko compatibles
+ - energyhome (prise connectée)
+ - smartmotor (volet roulant)

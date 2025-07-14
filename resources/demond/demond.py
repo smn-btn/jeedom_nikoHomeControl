@@ -575,21 +575,15 @@ def discover_niko_devices():
         })
 
 def parse_niko_devices(api_response):
-    """Parse la réponse de l'API Niko et extrait les équipements"""
+    """Parse la réponse de l'API Niko et extrait les équipements de type smartmotor ou energyhome"""
     devices = []
-    
     try:
         # La structure peut varier selon la version de l'API Niko
-        # Essayons plusieurs formats possibles
-        
         if isinstance(api_response, dict):
-            # Format: {"Devices": [...]}
             if 'Devices' in api_response:
                 device_list = api_response['Devices']
-            # Format: {"devices": [...]}
             elif 'devices' in api_response:
                 device_list = api_response['devices']
-            # Format direct: [...]
             else:
                 device_list = [api_response]
         elif isinstance(api_response, list):
@@ -597,24 +591,18 @@ def parse_niko_devices(api_response):
         else:
             logging.warning("⚠️  Format de réponse API inattendu: %s", type(api_response))
             return devices
-        
         for device_data in device_list:
             if not isinstance(device_data, dict):
                 continue
-                
             # Extraction des informations de l'équipement
             device_id = device_data.get('Uuid') or device_data.get('uuid') or device_data.get('Id')
             device_name = device_data.get('Name') or device_data.get('name') or f"Équipement {device_id}"
-            
-            # Déterminer le type d'équipement
             device_type = determine_device_type(device_data)
-            
-            # Localisation
+            # Filtrer uniquement smartmotor ou energyhome
+            if device_type not in ["smartmotor", "energyhome"]:
+                continue
             location = device_data.get('Location') or device_data.get('location') or 'Non défini'
-            
-            # Propriétés
             properties = device_data.get('Properties') or device_data.get('properties') or []
-            
             if device_id:
                 device = {
                     'id': device_id,
@@ -627,10 +615,8 @@ def parse_niko_devices(api_response):
                 }
                 devices.append(device)
                 logging.debug("🔧 Équipement parsé: %s (%s)", device_name, device_type)
-            
     except Exception as e:
         logging.error("❌ Erreur lors du parsing des équipements: %s", e)
-    
     return devices
 
 def determine_device_type(device_data):
@@ -940,25 +926,22 @@ def request_all_device_status():
         logging.error("❌ Erreur lors de la demande de liste des appareils: %s", e)
 
 def parse_device_from_list_response(device_data):
-    """Parse les informations d'un appareil depuis la réponse devices.list"""
+    """Parse les informations d'un appareil depuis la réponse devices.list, ne garde que smartmotor ou energyhome"""
     try:
         if not isinstance(device_data, dict):
             return None
-            
-        # Extraire les informations selon la structure Niko
         device_id = device_data.get('Uuid') or device_data.get('uuid')
         device_name = device_data.get('Name') or device_data.get('name') or f"Device_{device_id}"
         device_type = device_data.get('Type') or device_data.get('type') or 'unknown'
         location = device_data.get('Location') or device_data.get('location') or ''
         properties = device_data.get('Properties') or device_data.get('properties') or []
-        
         if not device_id:
             logging.debug("⚠️ Appareil sans UUID ignoré: %s", device_data)
             return None
-            
-        # Déterminer le type d'équipement plus précisément
         refined_type = determine_device_type(device_data)
-        
+        # Filtrer uniquement smartmotor ou energyhome
+        if refined_type not in ["smartmotor", "energyhome"]:
+            return None
         device_info = {
             'id': device_id,
             'name': device_name,
@@ -969,10 +952,8 @@ def parse_device_from_list_response(device_data):
             'raw_data': device_data,
             'discovery_method': 'mqtt_devices_list'
         }
-        
         logging.debug("🔧 Appareil parsé: %s (%s) - Type: %s", device_name, device_id, refined_type)
         return device_info
-        
     except Exception as e:
         logging.error("❌ Erreur lors du parsing de l'appareil: %s", e)
         logging.debug("Données problématiques: %s", device_data)
