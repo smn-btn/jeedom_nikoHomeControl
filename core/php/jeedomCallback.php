@@ -110,13 +110,23 @@ try {
                             $eqLogic->setConfiguration('type', $type); // Type d'équipement
                             $eqLogic->setConfiguration('location', isset($device['location']) ? $device['location'] : ''); // Localisation
                             $eqLogic->setConfiguration('raw_data', isset($device['raw_data']) ? $device['raw_data'] : array()); // Données brutes
+                            $eqLogic->setConfiguration('lastCommunication',date('Y-m-d H:i:s'));
+
                             $eqLogic->setEqType_name('nhc'); // Type Jeedom
                             $eqLogic->setIsEnable(1); // Activation
                             $eqLogic->setIsVisible(1); // Visibilité
+                            // Si smartmotor, configurer comme volet
+                            if ($type === 'smartmotor') {
+                                $eqLogic->setConfiguration('jeedom_type', 'volet');
+                            }
                             try {
                                 // Sauvegarde de l'équipement dans Jeedom
                                 $eqLogic->save();
                                 log::add('nhc', 'info', 'Création nouvel équipement : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
+                                // Ajout des commandes pour les volets si smartmotor
+                                if ($type === 'smartmotor') {
+                                    nhc::addVoletCommands($eqLogic);
+                                }
                             } catch (Exception $e) {
                                 log::add('nhc', 'error', 'Erreur lors de la sauvegarde de l\'équipement : ' . $e->getMessage());
                                 continue;

@@ -715,42 +715,43 @@ def send_niko_command(device_id, command, value=None):
 def build_niko_command_message(device_id, command, value=None):
     """Construit le message de commande selon le protocole Niko Home Control"""
     
-    # Mapper les commandes génériques vers les valeurs Niko
-    command_mapping = {
-        'on': 100,
-        'off': 0,
-        'toggle': None,  # Sera géré spécialement
-        'dim': value if value is not None else 50,
-        'up': 100,
-        'down': 0,
-        'stop': None,  # Pour les volets
-    }
+    # # Mapper les commandes génériques vers les valeurs Niko
+    # command_mapping = {
+    #     'on': 100,
+    #     'off': 0,
+    #     'toggle': None,  # Sera géré spécialement
+    #     'dim': value if value is not None else 50,
+    #     'up': 100,
+    #     'down': 0,
+    #     'stop': None,  # Pour les volets
+    # }
     
-    # Déterminer la valeur à envoyer
-    if command in command_mapping:
-        if command == 'toggle':
-            # Pour toggle, on devrait d'abord récupérer l'état actuel
-            # Pour l'instant, on utilise une valeur par défaut
-            status_value = 100  # On supposera "allumer" par défaut
-        elif command_mapping[command] is not None:
-            status_value = command_mapping[command]
-        else:
-            status_value = value if value is not None else 0
-    else:
-        # Commande personnalisée avec valeur directe
-        status_value = value if value is not None else 0
+    # # Déterminer la valeur à envoyer
+    # if command in command_mapping:
+    #     if command == 'toggle':
+    #         # Pour toggle, on devrait d'abord récupérer l'état actuel
+    #         # Pour l'instant, on utilise une valeur par défaut
+    #         status_value = 100  # On supposera "allumer" par défaut
+    #     elif command_mapping[command] is not None:
+    #         status_value = command_mapping[command]
+    #     else:
+    #         status_value = value if value is not None else 0
+    # else:
+    #     # Commande personnalisée avec valeur directe
+    #     status_value = value if value is not None else 0
     
     # Format du message selon la documentation Niko Home Control
     message = {
         "Method": "devices.control",
-        "Params": {
+        "Params": [{
             "Devices": [{
-                "Uuid": device_id,
                 "Properties": [{
-                    "Status": status_value
-                }]
+                    command:value
+                    #TODO manage property list
+                }],
+                "Uuid":device_id
             }]
-        }
+        }]
     }
     
     logging.debug("🔧 Message construit: %s", message)
