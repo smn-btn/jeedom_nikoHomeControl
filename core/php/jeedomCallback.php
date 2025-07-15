@@ -66,11 +66,14 @@ try {
                 break;
                 
             case 'mqtt_message':
-                // Traitement des messages MQTT pour mise à jour temps réel
+                // Traitement des messages MQTT pour mise à jour temps réel des équipements Jeedom
                 if (isset($result['topic']) && isset($result['data'])) {
+                    // Inclusion de la classe nhc si nécessaire
                     require_once dirname(__FILE__) . '/../class/nhc.class.php';
+                    // Délègue le traitement du message MQTT à la classe nhc
                     nhc::handleMqttMessage($result['topic'], $result['data']);
                 } else {
+                    // Log d'avertissement si le message MQTT est incomplet
                     log::add('nhc', 'warning', 'mqtt_message reçu sans topic ou data');
                 }
                 break;
@@ -79,46 +82,39 @@ try {
                 // Réponse à la découverte d'équipements (liste complète)
                 if (isset($result['devices']) && is_array($result['devices'])) {
                     log::add('nhc', 'info', 'Liste des équipements découverts reçue : ' . count($result['devices']) . ' équipements');
+                    // Inclusion de la classe nhc pour la gestion des équipements
                     require_once dirname(__FILE__) . '/../class/nhc.class.php';
                     foreach ($result['devices'] as $device) {
+                        // Récupération du UUID ou ID de l'équipement
                         $uuid = isset($device['uuid']) ? $device['uuid'] : (isset($device['id']) ? $device['id'] : null);
                         if ($uuid === null) {
+                            // Log d'erreur si l'UUID est manquant
                             log::add('nhc', 'error', 'UUID manquant pour un équipement : ' . print_r($device, true));
                             continue;
                         }
+                        // Récupération du type d'équipement
                         $type = isset($device['type']) ? $device['type'] : '';
-                        if (!in_array($type, array('smartmotor', 'energyhome'))) {
+                        // Filtrage des types non supportés
+                        if (!in_array($type, array('smartmotor', 'smartplug'))) {
                             log::add('nhc', 'debug', 'Type non supporté : ' . $type . ' (UUID: ' . $uuid . ')');
                             continue;
                         }
-                        // Correction de la méthode (typo possible)
-                        if (method_exists('eqLogic', 'byTypeAndSearchConfiguration')) {
-                            $eqLogic = eqLogic::byTypeAndSearchConfiguration('nhc', 'uuid', $uuid, '1');
-                        } elseif (method_exists('eqLogic', 'byTypeAndSearhConfiguration')) { // fallback typo
-                            $eqLogic = eqLogic::byTypeAndSearhConfiguration('nhc', 'uuid', $uuid, '1');
-                        } else {
-                            log::add('nhc', 'error', 'Méthode eqLogic::byTypeAndSearchConfiguration introuvable');
-                            continue;
-                        }
-                        if (is_array($eqLogic) && count($eqLogic) > 0 && is_object($eqLogic[0])) {
-                            $eqLogic = $eqLogic[0];
-                            log::add('nhc', 'info', 'Mise à jour équipement existant : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
-                        } else {
-                            if (!class_exists('nhc')) {
-                                log::add('nhc', 'error', 'Classe nhc non trouvée');
-                                continue;
-                            }
+                        // Recherche de l'équipement existant dans Jeedom
+                        $eqLogic = eqLogic::byLogicalId($uuid, 'nhc');
+                        if (!is_object($eqLogic)) {
+                            // Création d'un nouvel équipement si non existant
                             $eqLogic = new nhc();
-                            $eqLogic->setName($device['name']);
-                            $eqLogic->setLogicalId($uuid);
-                            $eqLogic->setConfiguration('uuid', $uuid);
-                            $eqLogic->setConfiguration('type', $type);
-                            $eqLogic->setConfiguration('location', isset($device['location']) ? $device['location'] : '');
-                            $eqLogic->setConfiguration('raw_data', isset($device['raw_data']) ? $device['raw_data'] : array());
-                            $eqLogic->setEqType_name('nhc');
-                            $eqLogic->setIsEnable(1);
-                            $eqLogic->setIsVisible(1);
+                            $eqLogic->setName($device['name']); // Nom affiché dans Jeedom
+                            $eqLogic->setLogicalId($uuid); // Identifiant unique
+                            $eqLogic->setConfiguration('uuid', $uuid); // Stockage du UUID
+                            $eqLogic->setConfiguration('type', $type); // Type d'équipement
+                            $eqLogic->setConfiguration('location', isset($device['location']) ? $device['location'] : ''); // Localisation
+                            $eqLogic->setConfiguration('raw_data', isset($device['raw_data']) ? $device['raw_data'] : array()); // Données brutes
+                            $eqLogic->setEqType_name('nhc'); // Type Jeedom
+                            $eqLogic->setIsEnable(1); // Activation
+                            $eqLogic->setIsVisible(1); // Visibilité
                             try {
+                                // Sauvegarde de l'équipement dans Jeedom
                                 $eqLogic->save();
                                 log::add('nhc', 'info', 'Création nouvel équipement : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
                             } catch (Exception $e) {
@@ -126,47 +122,16 @@ try {
                                 continue;
                             }
                         }
-                        // Mise à jour des propriétés spécifiques
-                        if ($type == 'energyhome' && isset($device['properties']) && is_array($device['properties'])) {
-                            foreach ($device['properties'] as $prop) {
-                                foreach ($prop as $key => $value) {
-                                    if (!class_exists('nhcCmd')) {
-                                        log::add('nhc', 'error', 'Classe nhcCmd non trouvée');
-                                        continue;
-                                    }
-                                    $cmd = $eqLogic->getCmd(null, strtolower($key));
-                                    if (!is_object($cmd)) {
-                                        $cmd = new nhcCmd();
-                                        $cmd->setName($key);
-                                        $cmd->setEqLogic_id($eqLogic->getId());
-                                        $cmd->setLogicalId(strtolower($key));
-                                        $cmd->setType('info');
-                                        $cmd->setSubType('numeric');
-                                        $cmd->setIsVisible(1);
-                                        $cmd->setEventOnly(1);
-                                        try {
-                                            $cmd->save();
-                                        } catch (Exception $e) {
-                                            log::add('nhc', 'error', 'Erreur lors de la sauvegarde de la commande : ' . $e->getMessage());
-                                            continue;
-                                        }
-                                    }
-                                    try {
-                                        $cmd->event($value);
-                                    } catch (Exception $e) {
-                                        log::add('nhc', 'error', 'Erreur lors de l\'enregistrement de la valeur de commande : ' . $e->getMessage());
-                                    }
-                                }
-                            }
+                        else{
+                            log::add('nhc', 'info', 'Équipement déjà existant : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
+                            // TODO : mise à jours de l'équipement si nécessaire
                         }
                     }
                 } else {
                     log::add('nhc', 'warning', 'discover_devices_response sans liste d\'équipements');
                 }
                 log::add('nhc', 'debug', 'Fin du traitement discover_devices_response');
-                // Fin du traitement : renvoyer une réponse JSON
-                // Correction : renvoyer la structure attendue par Jeedom
-
+                // Fin du traitement : renvoyer une réponse JSON attendue par Jeedom
                 echo json_encode([
                     'action' => 'discover_devices_response',
                     'devices' => isset($result['devices']) ? $result['devices'] : [],
