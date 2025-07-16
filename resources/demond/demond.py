@@ -810,7 +810,8 @@ def discover_niko_devices_mqtt():
             try:
                 topic = msg.topic
                 payload = msg.payload.decode('utf-8')
-                logging.debug("📨 Message reçu sur [%s]: %s", topic, payload)
+                # logging.debug("📨 Message MQTT reçu sur [%s]: %s", topic, payload) # uncomment to see the full mqtt message (>3000 lines)
+                logging.debug("📨 Message MQTT reçu sur [%s]", topic)
                 
                 # Traiter seulement les réponses sur le topic rsp
                 if topic == "hobby/control/devices/rsp":
@@ -938,24 +939,27 @@ def parse_device_from_list_response(device_data):
         device_id = device_data.get('Uuid') or device_data.get('uuid')
         device_name = device_data.get('Name') or device_data.get('name') or f"Device_{device_id}"
         device_type = device_data.get('Type') or device_data.get('type') or 'unknown'
+        device_model = device_data.get('Model') or device_data.get('model') or 'unknown'
         location = device_data.get('Location') or device_data.get('location') or ''
         properties = device_data.get('Properties') or device_data.get('properties') or []
         if not device_id:
             logging.debug("⚠️ Appareil sans UUID ignoré: %s", device_data)
             return None
-        refined_type = determine_device_type(device_data)
+        
         device_info = {
             'id': device_id,
             'name': device_name,
-            'type': refined_type,
+            'type': device_type,
+            'model': device_model,
             'uuid': device_id,
             'location': location,
             'properties': properties,
             'raw_data': device_data,
             'discovery_method': 'mqtt_devices_list'
         }
-        logging.debug("🔧 Appareil parsé: %s (%s) - Type: %s", device_name, device_id, refined_type)
+        logging.debug("🔧 Appareil parsé: %s (%s) - Type: %s - Model: %s", device_name, device_id, device_type, device_model)
         return device_info
+    
     except Exception as e:
         logging.error("❌ Erreur lors du parsing de l'appareil: %s", e)
         logging.debug("Données problématiques: %s", device_data)

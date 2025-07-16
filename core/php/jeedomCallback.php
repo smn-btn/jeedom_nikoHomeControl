@@ -95,8 +95,14 @@ try {
                         // Récupération du type d'équipement
                         $type = isset($device['type']) ? $device['type'] : '';
                         // Filtrage des types non supportés
-                        if (!in_array($type, array('smartmotor', 'smartplug'))) {
+                        if ($type !== 'action') {
                             log::add('nhc', 'debug', 'Type non supporté : ' . $type . ' (UUID: ' . $uuid . ')');
+                            continue;
+                        }
+                        // Création uniquement si le modèle est "rolldownshutter" ou "socket"
+                        $model = isset($device['model']) ? $device['model'] : '';
+                        if ($model !== 'rolldownshutter' && $model !== 'socket') {
+                            log::add('nhc', 'debug', 'Modèle non supporté : ' . $model . ' (UUID: ' . $uuid . ')');
                             continue;
                         }
                         // Recherche de l'équipement existant dans Jeedom
@@ -115,18 +121,20 @@ try {
                             $eqLogic->setEqType_name('nhc'); // Type Jeedom
                             $eqLogic->setIsEnable(1); // Activation
                             $eqLogic->setIsVisible(1); // Visibilité
+
                             // Si smartmotor, configurer comme volet
-                            if ($type === 'smartmotor') {
-                                $eqLogic->setConfiguration('jeedom_type', 'volet');
-                            }
+                            // if ($model === 'rolldownshutter') {
+                            //     $eqLogic->setConfiguration('jeedom_type', 'volet');
+                            // }
                             try {
                                 // Sauvegarde de l'équipement dans Jeedom
                                 $eqLogic->save();
                                 log::add('nhc', 'info', 'Création nouvel équipement : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
-                                // Ajout des commandes pour les volets si smartmotor
-                                if ($type === 'smartmotor') {
+                                // Ajout des commandes pour les volets si smartmotor ou rolldownshutter
+                                if ($type === 'action' && $model === 'rolldownshutter') {
                                     nhc::addVoletCommands($eqLogic);
                                 }
+                                // TODO : ajouter les commandes pour les prises connectées
                             } catch (Exception $e) {
                                 log::add('nhc', 'error', 'Erreur lors de la sauvegarde de l\'équipement : ' . $e->getMessage());
                                 continue;

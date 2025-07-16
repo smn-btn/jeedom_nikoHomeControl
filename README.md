@@ -24,8 +24,8 @@ Voila, votre plugin est basiquement prêt pour coder votre travail.
 
 
 ## Types d'équipement Niko compatibles
- - energyhome (prise connectée)
- - smartmotor (volet roulant)
+ - Model = socket (prise connectée)
+ - Model = rolldownshutter (volet roulant)
 
 
 # TODO
@@ -37,3 +37,4 @@ Voila, votre plugin est basiquement prêt pour coder votre travail.
 - widget
 - manage property list on command
 - rajouter une alerte pour la fin de validity du token
+
