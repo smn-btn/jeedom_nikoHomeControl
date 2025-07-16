@@ -36,3 +36,4 @@ Voila, votre plugin est basiquement prêt pour coder votre travail.
 - refresh du php après le scan
 - widget
 - manage property list on command
+- rajouter une alerte pour la fin de validity du token
