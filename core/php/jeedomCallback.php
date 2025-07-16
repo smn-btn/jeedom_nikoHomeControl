@@ -33,7 +33,14 @@ try {
         die();
     }
     
-    log::add('nhc', 'debug', 'Message reçu du démon: ' . print_r($result, true));
+    // Masquage des champs sensibles avant log
+    $result_log = $result;
+    foreach(['apikey','token','jwt','niko_jwt'] as $sensitive) {
+        if (isset($result_log[$sensitive])) {
+            $result_log[$sensitive] = '[masqué]';
+        }
+    }
+    log::add('nhc', 'debug', 'Message reçu du démon: ' . print_r($result_log, true));
     
     if (isset($result['action'])) {
         switch ($result['action']) {
