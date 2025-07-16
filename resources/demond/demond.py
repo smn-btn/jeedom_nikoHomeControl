@@ -810,7 +810,7 @@ def discover_niko_devices_mqtt():
             try:
                 topic = msg.topic
                 payload = msg.payload.decode('utf-8')
-                logging.debug("📨 Message reçu sur [%s]: %s", topic, payload[:200] + "..." if len(payload) > 200 else payload)
+                logging.debug("📨 Message reçu sur [%s]: %s", topic, payload)
                 
                 # Traiter seulement les réponses sur le topic rsp
                 if topic == "hobby/control/devices/rsp":
