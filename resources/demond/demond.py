@@ -68,6 +68,10 @@ def on_connect(client, userdata, flags, rc):
         result2 = client.subscribe("hobby/control/devices/rsp/#")
         logging.info("Topic responses: hobby/control/devices/rsp/# - Résultat: %s", result2)
         
+        # Erreurs des appareils (changements d'état)
+        result3 = client.subscribe("hobby/control/devices/err/#")
+        logging.info("Topic events: hobby/control/devices/err/# - Résultat: %s", result3)
+        
         # Envoyer confirmation à Jeedom
         if jeedom_com_instance:
             try:
@@ -744,8 +748,8 @@ def build_niko_command_message(device_id, command, value=None):
     message = {
         "Method": "devices.control",
         "Params": [{
-            "Devices": [{
-                "Properties": [{
+            "Devices":[{
+                "Properties":[{
                     command:value
                     #TODO manage property list
                 }],
