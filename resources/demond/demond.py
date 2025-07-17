@@ -493,176 +493,6 @@ def test_niko_connection(ip, jwt):
             'message': str(e)
         })
 
-def discover_niko_devices():
-    """Découvre les équipements Niko via l'API REST"""
-    logging.info("🔍 Découverte des équipements Niko via API REST...")
-    
-    if not _niko_ip or not _niko_jwt:
-        logging.error("❌ Configuration Niko manquante pour la découverte")
-        return
-    
-    try:
-        # URL de l'API REST pour lister les équipements
-        url = f"https://{_niko_ip}:8443/hobby/control/devices"
-        
-        # Headers avec authentification JWT
-        headers = {
-            'Authorization': f'Bearer {_niko_jwt}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        
-        logging.info("🌐 Requête API: GET %s", url)
-        
-        # Requête avec vérification SSL désactivée (comme pour MQTT)
-        response = requests.get(url, headers=headers, verify=False, timeout=10)
-        
-        logging.info("📡 Réponse API: Status=%d", response.status_code)
-        
-        if response.status_code == 200:
-            devices_data = response.json()
-            logging.info("📊 Données reçues: %s", devices_data)
-            
-            # Parser la réponse et extraire les équipements
-            discovered_devices = parse_niko_devices(devices_data)
-            
-            # Envoyer chaque équipement à Jeedom
-            for device in discovered_devices:
-                jeedom_com_instance.send_change_immediate({
-                    'action': 'device_discovered',
-                    'device_id': device['id'],
-                    'name': device['name'],
-                    'type': device['type'],
-                    'uuid': device.get('uuid'),
-                    'location': device.get('location'),
-                    'properties': device.get('properties', [])
-                })
-                logging.debug("📤 Équipement envoyé: %s", device['name'])
-                
-            logging.info("✅ Découverte terminée: %d équipements trouvés", len(discovered_devices))
-            
-        elif response.status_code == 401:
-            logging.error("❌ Erreur d'authentification: JWT token invalide ou expiré")
-            jeedom_com_instance.send_change_immediate({
-                'action': 'discovery_error',
-                'error': 'authentication_failed',
-                'message': 'Token JWT invalide ou expiré'
-            })
-        else:
-            logging.error("❌ Erreur API: %d - %s", response.status_code, response.text)
-            jeedom_com_instance.send_change_immediate({
-                'action': 'discovery_error',
-                'error': 'api_error',
-                'message': f'Erreur API: {response.status_code}'
-            })
-            
-    except requests.exceptions.Timeout:
-        logging.error("❌ Timeout lors de la requête API")
-        jeedom_com_instance.send_change_immediate({
-            'action': 'discovery_error',
-            'error': 'timeout',
-            'message': 'Timeout de connexion à l\'API'
-        })
-    except requests.exceptions.ConnectionError as e:
-        logging.error("❌ Erreur de connexion API: %s", e)
-        jeedom_com_instance.send_change_immediate({
-            'action': 'discovery_error',
-            'error': 'connection_error',
-            'message': str(e)
-        })
-    except Exception as e:
-        logging.error("❌ Erreur inattendue lors de la découverte: %s", e)
-        jeedom_com_instance.send_change_immediate({
-            'action': 'discovery_error',
-            'error': 'unknown',
-            'message': str(e)
-        })
-
-def parse_niko_devices(api_response):
-    """Parse la réponse de l'API Niko et extrait les équipements de type smartmotor ou energyhome"""
-    devices = []
-    try:
-        # La structure peut varier selon la version de l'API Niko
-        if isinstance(api_response, dict):
-            if 'Devices' in api_response:
-                device_list = api_response['Devices']
-            elif 'devices' in api_response:
-                device_list = api_response['devices']
-            else:
-                device_list = [api_response]
-        elif isinstance(api_response, list):
-            device_list = api_response
-        else:
-            logging.warning("⚠️  Format de réponse API inattendu: %s", type(api_response))
-            return devices
-        for device_data in device_list:
-            if not isinstance(device_data, dict):
-                continue
-            # Extraction des informations de l'équipement
-            device_id = device_data.get('Uuid') or device_data.get('uuid') or device_data.get('Id')
-            device_name = device_data.get('Name') or device_data.get('name') or f"Équipement {device_id}"
-            device_type = determine_device_type(device_data)
-            # Filtrer uniquement smartmotor ou energyhome
-            if device_type not in ["smartmotor", "energyhome"]:
-                continue
-            location = device_data.get('Location') or device_data.get('location') or 'Non défini'
-            properties = device_data.get('Properties') or device_data.get('properties') or []
-            if device_id:
-                device = {
-                    'id': device_id,
-                    'name': device_name,
-                    'type': device_type,
-                    'uuid': device_id,
-                    'location': location,
-                    'properties': properties,
-                    'raw_data': device_data  # Garder les données brutes pour debug
-                }
-                devices.append(device)
-                logging.debug("🔧 Équipement parsé: %s (%s)", device_name, device_type)
-    except Exception as e:
-        logging.error("❌ Erreur lors du parsing des équipements: %s", e)
-    return devices
-
-def determine_device_type(device_data):
-    """Détermine le type d'équipement à partir des données Niko"""
-    
-    # Vérifier le type explicite s'il existe
-    device_type = device_data.get('Type') or device_data.get('type')
-    if device_type:
-        return device_type.lower()
-    
-    # Vérifier les propriétés pour deviner le type
-    properties = device_data.get('Properties') or device_data.get('properties') or []
-    
-    for prop in properties:
-        if isinstance(prop, dict):
-            prop_type = prop.get('Type') or prop.get('type') or ''
-            prop_type_lower = prop_type.lower()
-            
-            if 'light' in prop_type_lower or 'dimmer' in prop_type_lower:
-                return 'light'
-            elif 'switch' in prop_type_lower:
-                return 'switch'
-            elif 'motor' in prop_type_lower:
-                return 'cover'
-            elif 'sensor' in prop_type_lower:
-                return 'sensor'
-    
-    # Vérifier le nom pour deviner le type
-    device_name = (device_data.get('Name') or device_data.get('name') or '').lower()
-    
-    if any(word in device_name for word in ['light', 'lumière', 'éclairage', 'lampe']):
-        return 'light'
-    elif any(word in device_name for word in ['switch', 'interrupteur', 'bouton']):
-        return 'switch'
-    elif any(word in device_name for word in ['volet', 'store', 'cover', 'blind']):
-        return 'cover'
-    elif any(word in device_name for word in ['sensor', 'capteur', 'détecteur']):
-        return 'sensor'
-    
-    # Type par défaut
-    return 'unknown'
-
 def send_niko_command(device_id, command, value=None):
     """Envoie une commande à un équipement Niko via MQTT"""
     logging.info("📤 Envoi commande %s à %s (valeur: %s)", command, device_id, value)
@@ -872,36 +702,36 @@ def discover_niko_devices_mqtt():
         logging.error("❌ Erreur lors de la découverte MQTT: %s", e)
         return []
 
-def parse_mqtt_device_info(topic, data):
-    """Parse les informations d'un appareil depuis un message MQTT"""
-    try:
-        # Extraire l'ID de l'appareil du topic
-        # Format attendu: hobby/control/devices/evt/[device_id]
-        topic_parts = topic.split('/')
-        if len(topic_parts) >= 5:
-            device_id = topic_parts[4]
-        else:
-            device_id = extract_device_id(topic, data)
+# def parse_mqtt_device_info(topic, data):
+#     """Parse les informations d'un appareil depuis un message MQTT"""
+#     try:
+#         # Extraire l'ID de l'appareil du topic
+#         # Format attendu: hobby/control/devices/evt/[device_id]
+#         topic_parts = topic.split('/')
+#         if len(topic_parts) >= 5:
+#             device_id = topic_parts[4]
+#         else:
+#             device_id = extract_device_id(topic, data)
             
-        if not device_id:
-            return None
+#         if not device_id:
+#             return None
             
-        # Extraire les informations de l'appareil
-        device_info = {
-            'id': device_id,
-            'name': data.get('Name') or f"Device_{device_id}",
-            'type': data.get('Type') or 'unknown',
-            'uuid': data.get('Uuid') or device_id,
-            'location': data.get('Location') or '',
-            'properties': data.get('Properties') or [],
-            'last_seen': time.time()
-        }
+#         # Extraire les informations de l'appareil
+#         device_info = {
+#             'id': device_id,
+#             'name': data.get('Name') or f"Device_{device_id}",
+#             'type': data.get('Type') or 'unknown',
+#             'uuid': data.get('Uuid') or device_id,
+#             'location': data.get('Location') or '',
+#             'properties': data.get('Properties') or [],
+#             'last_seen': time.time()
+#         }
         
-        return device_info
+#         return device_info
         
-    except Exception as e:
-        logging.debug("Erreur lors du parsing des infos MQTT: %s", e)
-        return None
+#     except Exception as e:
+#         logging.debug("Erreur lors du parsing des infos MQTT: %s", e)
+#         return None
 
 def request_all_device_status():
     """Demande la liste de tous les appareils via MQTT selon la doc officielle"""
