@@ -24,5 +24,17 @@ Voila, votre plugin est basiquement prêt pour coder votre travail.
 
 
 ## Types d'équipement Niko compatibles
- - energyhome (prise connectée)
- - smartmotor (volet roulant)
+ - Model = socket (prise connectée)
+ - Model = rolldownshutter (volet roulant)
+
+
+# TODO
+- Documentation du plugin
+- refresh des équipements NHC
+- ecoute et maj des etats des équipements NHC
+- gestion des commandes des prise connectées
+- refresh du php après le scan
+- widget
+- manage property list on command
+- rajouter une alerte pour la fin de validity du token
+

@@ -574,29 +574,144 @@ class nhc extends eqLogic {
         }
     }
 
+    /**
+     * Ajoute les commandes Jeedom pour un volet (smartmotor) à un équipement nhc
+     * @param nhc $eqLogic
+     */
+    public static function addVoletCommands($eqLogic) {
+        // Etat
+        if (!is_object($eqLogic->getCmd(null, 'etat'))) {
+            $cmd = new nhcCmd();
+            $cmd->setName('Etat');
+            $cmd->setEqLogic_id($eqLogic->getId());
+            $cmd->setLogicalId('etat');
+            $cmd->setType('info');
+            $cmd->setSubType('binary');
+            $cmd->setIsHistorized(1);
+            $cmd->setConfiguration('jeedom_cmd_type', 'Info/Volet Etat');
+            $cmd->save();
+        }
+        // Monter
+        if (!is_object($eqLogic->getCmd(null, 'up'))) {
+            $cmd = new nhcCmd();
+            $cmd->setName('Monter');
+            $cmd->setEqLogic_id($eqLogic->getId());
+            $cmd->setLogicalId('up');
+            $cmd->setType('action');
+            $cmd->setSubType('other');
+            $cmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Monter');
+            $cmd->save();
+        }
+        // Descendre
+        if (!is_object($eqLogic->getCmd(null, 'down'))) {
+            $cmd = new nhcCmd();
+            $cmd->setName('Descendre');
+            $cmd->setEqLogic_id($eqLogic->getId());
+            $cmd->setLogicalId('down');
+            $cmd->setType('action');
+            $cmd->setSubType('other');
+            $cmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Descendre');
+            $cmd->save();
+        }
+        // Stop
+        if (!is_object($eqLogic->getCmd(null, 'stop'))) {
+            $cmd = new nhcCmd();
+            $cmd->setName('Stop');
+            $cmd->setEqLogic_id($eqLogic->getId());
+            $cmd->setLogicalId('stop');
+            $cmd->setType('action');
+            $cmd->setSubType('other');
+            $cmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Stop');
+            $cmd->save();
+        }
+        // Slider (optionnel, pour gestion du pourcentage)
+        if (!is_object($eqLogic->getCmd(null, 'slider'))) {
+            $cmd = new nhcCmd();
+            $cmd->setName('Position');
+            $cmd->setEqLogic_id($eqLogic->getId());
+            $cmd->setLogicalId('slider');
+            $cmd->setType('action');
+            $cmd->setSubType('slider');
+            $cmd->setConfiguration('minValue', 0);
+            $cmd->setConfiguration('maxValue', 100);
+            $cmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Slider');
+            $cmd->save();
+        }
+    }
 }
 
 class nhcCmd extends cmd {
   /*     * *************************Attributs****************************** */
 
-  /*
-  public static $_widgetPossibility = array();
-  */
-
   /*     * ***********************Methode static*************************** */
-
 
   /*     * *********************Methode d'instance************************* */
 
-  /*
-  * Permet d'empêcher la suppression des commandes même si elles ne sont pas dans la nouvelle configuration de l'équipement envoyé en JS
-  public function dontRemoveCmd() {
-    return true;
-  }
-  */
-
-  // Exécution d'une commande
+  // Exécution d'une commande Jeedom pour le plugin Niko Home Control
   public function execute($_options = array()) {
+    // Récupère l'identifiant logique de la commande (ex : up, down, stop, slider)
+    $logicalId = $this->getLogicalId();
+    // Récupère l'équipement parent associé à la commande
+    $eqLogic = $this->getEqLogic();
+    // On ne traite que les commandes volet spécifiques
+    if (in_array($logicalId, array('up', 'down', 'stop', 'slider'))) {
+      // Récupère le port du socket utilisé par le démon Python
+      $socketport = config::byKey('socketport', 'nhc', '55001');
+      // Récupère la clé API Jeedom pour sécuriser la communication
+      $apikey = jeedom::getApiKey('nhc');
+      // Récupère l'UUID de l'équipement cible
+      $uuid = $eqLogic->getConfiguration('uuid');
+      $commandType = '';
+      $value = null;
+      // Détermine le type de commande et la valeur à envoyer selon l'action
+      if ($logicalId == 'up') {
+        $commandType = 'Action'; // Action pour monter le volet
+        $value = 'Open';
+      } elseif ($logicalId == 'down') {
+        $commandType = 'Action'; // Action pour descendre le volet
+        $value = 'Close';
+      } elseif ($logicalId == 'stop') {
+        $commandType = 'Action'; // Action pour stopper le volet
+        $value = 'Stop';
+      } elseif ($logicalId == 'slider') {
+        $commandType = 'Position'; // Action pour positionner le volet
+        $value = isset($_options['slider']) ? strval(intval($_options['slider'])) : '0';
+      }
+      // Prépare la commande MQTT à envoyer au démon Python
+      $mqttCommand = array(
+        'apikey' => $apikey,
+        'action' => 'send_command',
+        'device_id' => $uuid,
+        'command' => $commandType,
+        'value' => $value
+      );
+
+      try {
+        // Création du socket TCP pour communiquer avec le démon
+        $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        if ($socket === false) {
+          throw new Exception('Impossible de créer le socket : ' . socket_strerror(socket_last_error()));
+        }
+        // Configuration des timeouts pour la connexion
+        socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, array('sec' => 5, 'usec' => 0));
+        socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, array('sec' => 2, 'usec' => 0));
+        // Connexion au démon Python sur le port défini
+        $result = socket_connect($socket, '127.0.0.1', intval($socketport));
+        if ($result === false) {
+          throw new Exception('Impossible de se connecter au démon : ' . socket_strerror(socket_last_error($socket)));
+        }
+        // Envoi de la commande MQTT au format JSON
+        $sent = socket_write($socket, json_encode($mqttCommand) . "\n");
+        if ($sent === false) {
+          throw new Exception('Erreur envoi commande : ' . socket_strerror(socket_last_error($socket)));
+        }
+        // Fermeture du socket après l'envoi
+        socket_close($socket);
+      } catch (Exception $e) {
+        log::add('nhc', 'error', 'Erreur lors de l\'envoi de la commande MQTT : ' . $e->getMessage());
+      }
+    }
+    // ...autres types de commandes si besoin...
   }
 
   /*     * **********************Getteur Setteur*************************** */
