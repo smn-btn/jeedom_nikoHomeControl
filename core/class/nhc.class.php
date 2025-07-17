@@ -675,7 +675,7 @@ class nhcCmd extends cmd {
         $value = 'Stop';
       } elseif ($logicalId == 'slider') {
         $commandType = 'Position'; // Action pour positionner le volet
-        $value = isset($_options['slider']) ? intval($_options['slider']) : 0;
+        $value = isset($_options['slider']) ? strval(intval($_options['slider'])) : '0';
       }
       // Prépare la commande MQTT à envoyer au démon Python
       $mqttCommand = array(
