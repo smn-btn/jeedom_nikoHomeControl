@@ -579,17 +579,21 @@ class nhc extends eqLogic {
      * @param nhc $eqLogic
      */
     public static function addVoletCommands($eqLogic) {
-        // Etat
-        if (!is_object($eqLogic->getCmd(null, 'etat'))) {
-            $cmd = new nhcCmd();
-            $cmd->setName('Etat');
-            $cmd->setEqLogic_id($eqLogic->getId());
-            $cmd->setLogicalId('etat');
-            $cmd->setType('info');
-            $cmd->setSubType('binary');
-            $cmd->setIsHistorized(1);
-            $cmd->setConfiguration('jeedom_cmd_type', 'Info/Volet Etat');
-            $cmd->save();
+        // Position (info)
+        $positionCmd = $eqLogic->getCmd(null, 'position');
+        if (!is_object($positionCmd)) {
+            $positionCmd = new nhcCmd();
+            $positionCmd->setName('État Position');
+            $positionCmd->setEqLogic_id($eqLogic->getId());
+            $positionCmd->setLogicalId('position');
+            $positionCmd->setType('info');
+            $positionCmd->setSubType('numeric');
+            $positionCmd->setIsHistorized(1);
+            $positionCmd->setUnite('%');
+            $positionCmd->setConfiguration('minValue', 0);
+            $positionCmd->setConfiguration('maxValue', 100);
+            $positionCmd->setConfiguration('jeedom_cmd_type', 'Info/Volet Etat');
+            $positionCmd->save();
         }
         // Monter
         if (!is_object($eqLogic->getCmd(null, 'up'))) {
@@ -625,17 +629,22 @@ class nhc extends eqLogic {
             $cmd->save();
         }
         // Slider (optionnel, pour gestion du pourcentage)
-        if (!is_object($eqLogic->getCmd(null, 'slider'))) {
-            $cmd = new nhcCmd();
-            $cmd->setName('Position');
-            $cmd->setEqLogic_id($eqLogic->getId());
-            $cmd->setLogicalId('slider');
-            $cmd->setType('action');
-            $cmd->setSubType('slider');
-            $cmd->setConfiguration('minValue', 0);
-            $cmd->setConfiguration('maxValue', 100);
-            $cmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Slider');
-            $cmd->save();
+        $sliderCmd = $eqLogic->getCmd(null, 'slider');
+        if (!is_object($sliderCmd)) {
+            $sliderCmd = new nhcCmd();
+            $sliderCmd->setName('Position');
+            $sliderCmd->setEqLogic_id($eqLogic->getId());
+            $sliderCmd->setLogicalId('slider');
+            $sliderCmd->setType('action');
+            $sliderCmd->setSubType('slider');
+            $sliderCmd->setConfiguration('minValue', 0);
+            $sliderCmd->setConfiguration('maxValue', 100);
+            $sliderCmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Slider');
+            $sliderCmd->setValue($positionCmd->getId());
+            $sliderCmd->save();
+        } else {
+            $sliderCmd->setValue($positionCmd->getId());
+            $sliderCmd->save();
         }
     }
 }
