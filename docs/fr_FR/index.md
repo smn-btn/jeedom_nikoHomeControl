@@ -1,18 +1,62 @@
-# Plugin template
+# Plugin Niko Home Control
 
-Ce "template de plugin" sert de base à la réalisation de plugins pour **Jeedom**.
+Ce plugin permet de piloter les équipements de votre installation Niko Home Control
 
-La documentation générale relative à la conception de plugin est consultable [ici](https://doc.jeedom.com/fr_FR/dev/).
+Il utilise l'API locale (Hobby API) fournie par Niko, qui communique via le protocole MQTT.
 
-Dans le détail :   
-* [Utilisation du template de plugin](https://doc.jeedom.com/fr_FR/dev/plugin_template) : Le template de plugin est une base de plugin pour Jeedom qui doit être adaptée avec l'id de votre plugin et à laquelle il suffit d'ajouter vos propres fonctions.
+## Configuration
 
-* [Fichier info.json](https://doc.jeedom.com/fr_FR/dev/structure_info_json) : Intégré depuis la version 3.0 de Jeedom, le fichier **info.json** est obligatoire pour le bon fonctionnement des plugins et leur bon déploiement sur le Market Jeedom.
+La configuration du plugin est accessible depuis le menu `Plugins` → `Gestion des plugins` → `Niko Home Control`.
 
-* [Icône du plugin](https://doc.jeedom.com/fr_FR/dev/Icone_de_plugin) : Afin de pouvoir être publié sur le Market Jeedom, tout plugin doit disposer d’une icône. Attention à ne pas utiliser le même code couleur que les icônes des plugins Jeedom officiels.
+### Prérequis
 
-* [Widget du plugin](https://doc.jeedom.com/fr_FR/dev/widget_plugin) : Présentation des différentes manières d'inclure des widgets personnalisés au plugin.
+Avant de configurer le plugin, vous devez :
+1.  Posséder une installation Niko Home Control avec un **Connected Controller**.
+2.  Activer le **Hobby Profile** sur votre installation et récupérer le **Token d'accès (JWT)**. La procédure est détaillée dans la documentation de Niko Home Control. Vous aurez besoin de l'adresse IP de votre contrôleur et du mot de passe que vous avez défini pour le profil "hobby". [plus d'info ici](https://guide.niko.eu/fr/smnhc2/lv/hobby-api#)
+3.  pour éviter de reconfigurer le plugin, vous pouvez configurer l'IP du hub Niko Home Control en IP Statique
 
-* [Documentation du plugin](https://doc.jeedom.com/fr_FR/dev/documentation_plugin) : Présentation de la mise en place d'une documentation car un bon plugin n'est rien sans documentation adéquate.
+### Configuration du plugin
 
-* [Publication du plugin](https://doc.jeedom.com/fr_FR/dev/publication_plugin) : Description des pré-requis indispensables à la publication du plugin.
+Une fois sur la page de configuration du plugin, vous devrez renseigner les informations suivantes :
+
+-   **Adresse IP du contrôleur Niko** : L'adresse IP locale de votre Connected Controller.
+-   **Token d'accès (JWT)** : Le token que vous avez généré via le Hobby Profile.
+
+Après avoir sauvegardé ces informations, vous devrez :
+1.  **Installer les dépendances** : Cliquez sur le bouton `Relancer` dans la section `Dépendances`.
+2.  **Démarrer le démon** : Une fois les dépendances installées, le démon devrait démarrer automatiquement. Vous pouvez vérifier son statut dans la section `Démon`. S'il n'est pas `OK`, vous pouvez le démarrer manuellement.
+
+## Utilisation
+
+### Découverte des équipements
+
+Une fois le plugin configuré et le démon démarré, vous pouvez lancer la découverte de vos équipements Niko Home Control.
+
+1.  Allez sur la page du plugin (`Plugins` → `Protocole domotique` → `Niko Home Control`).
+2.  Cliquez sur le bouton **Scan** en haut
+3.  Le plugin va interroger votre installation Niko et créer automatiquement les équipements compatibles trouvés.
+
+Un rafraîchissement de la page peut être nécessaire pour voir les nouveaux équipements.
+
+### Équipements compatibles
+
+Le plugin supporte actuellement les types d'équipements suivants :
+-   Volets roulants / Stores (`rolldownshutter`)
+-   à venir : Prises connectées (`socket`)
+
+## FAQ
+
+**Le démon ne démarre pas**
+Vérifiez les points suivants :
+- Assurez-vous que les dépendances sont bien installées et à jour (statut `OK`).
+- Consultez les logs du plugin (`nhc` et `nhc_update`) depuis le menu `Analyse` → `Logs` pour identifier l'erreur. Souvent, un problème de configuration (IP ou Token) empêche le démon de se lancer.
+
+**La découverte ne trouve aucun équipement**
+- Vérifiez que le démon est bien en statut `OK`.
+- Assurez-vous que l'adresse IP du contrôleur est correcte et que votre Jeedom peut communiquer avec sur le réseau.
+- Vérifiez la validité de votre Token JWT. Il a une durée de vie limitée (généralement 1 an) et doit être renouvelé.
+
+**Les commandes ne fonctionnent pas ou l'état ne se met pas à jour**
+- Vérifiez que le démon est toujours en cours d'exécution.
+- Consultez les logs `nhc` en mode debug pour voir les commandes envoyées et les messages reçus du contrôleur Niko.
+

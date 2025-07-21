@@ -174,7 +174,7 @@ class nhc extends eqLogic {
     
     $apikey = jeedom::getApiKey('nhc');
     $cmd .= ' --apikey ' . $apikey;
-    log::add('nhc', 'debug', 'API key: ' . substr($apikey, 0, 10) . '...');
+    log::add('nhc', 'debug', 'API key utilisée (valeur masquée pour sécurité)');
     
     $pid_file = jeedom::getTmpFolder('nhc') . '/demond.pid';
     $cmd .= ' --pid ' . $pid_file;
@@ -187,7 +187,7 @@ class nhc extends eqLogic {
     
     $niko_jwt = config::byKey('niko_jwt', 'nhc', '');
     $cmd .= ' --niko_jwt ' . $niko_jwt;
-    log::add('nhc', 'debug', 'Niko JWT: ' . ($niko_jwt ? substr($niko_jwt, 0, 20) . '...' : 'NON DÉFINI'));
+    log::add('nhc', 'debug', 'Niko JWT utilisé (valeur masquée pour sécurité)');
     
     log::add('nhc', 'info', 'Lancement démon nhc : ' . $cmd);
     
