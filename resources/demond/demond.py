@@ -431,22 +431,29 @@ def handle_jeedom_command(message):
         test_niko_connection(message.get('ip'), message.get('jwt'))
     elif action == 'discover_devices':
         logging.info("Découverte d'équipements demandée via MQTT")
+        transaction_id = message.get('transaction_id')
         try:
             devices = discover_niko_devices_mqtt()
             # Toujours renvoyer une réponse JSON, même si la liste est vide
-            jeedom_com_instance.send_change_immediate({
+            response = {
                 'action': 'discover_devices_response',
                 'devices': devices,
                 'count': len(devices)
-            })
+            }
+            if transaction_id:
+                response['transaction_id'] = transaction_id
+            jeedom_com_instance.send_change_immediate(response)
         except Exception as e:
             logging.error("Erreur lors de la découverte MQTT : %s", e)
-            jeedom_com_instance.send_change_immediate({
+            response = {
                 'action': 'discover_devices_response',
                 'devices': [],
                 'count': 0,
                 'error': str(e)
-            })
+            }
+            if transaction_id:
+                response['transaction_id'] = transaction_id
+            jeedom_com_instance.send_change_immediate(response)
     elif action == 'send_command':
         logging.info("Commande à envoyer: %s", message)
         send_niko_command(message.get('device_id'), message.get('command'), message.get('value'))

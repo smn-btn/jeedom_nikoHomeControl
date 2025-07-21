@@ -143,7 +143,7 @@ class nhc extends eqLogic {
     $path = realpath(dirname(__FILE__) . '/../../resources/demond');
     log::add('nhc', 'debug', 'Répertoire démon: ' . $path);
     
-    $python_venv_path = dirname(__FILE__) . '/../../resources/venv/bin/python3';
+    $python_venv_path = dirname(__FILE__) . '/../../resources/python_venv/bin/python3';
     $python_venv = file_exists($python_venv_path) ? $python_venv_path : false;
     log::add('nhc', 'debug', 'Chemin venv: ' . $python_venv_path);
     log::add('nhc', 'debug', 'Venv existe: ' . ($python_venv ? 'OUI' : 'NON'));
@@ -349,7 +349,7 @@ class nhc extends eqLogic {
     log::add('nhc', 'debug', 'Vérification dépendances Python...');
     
     // Déterminer quel Python utiliser (environnement virtuel ou système)
-    $python_venv_path = dirname(__FILE__) . '/../../resources/venv/bin/python3';
+    $python_venv_path = dirname(__FILE__) . '/../../resources/python_venv/bin/python3';
     $python_venv = file_exists($python_venv_path) ? $python_venv_path : false;
     log::add('nhc', 'debug', 'Chemin venv: ' . $python_venv_path);
     log::add('nhc', 'debug', 'Venv existe: ' . ($python_venv ? 'OUI' : 'NON'));
@@ -424,112 +424,60 @@ class nhc extends eqLogic {
   * Permet de découvrir les appareils via MQTT Niko Home Control
   */
   public static function discoverDevices() {
-        log::add('nhc', 'debug', '=== DÉBUT discoverDevices() via MQTT ===');
-        
-        // Vérification de la configuration
-        $niko_ip = config::byKey('niko_ip', 'nhc', '');
-        if (empty($niko_ip)) {
-            log::add('nhc', 'error', 'Configuration Niko IP manquante');
-            return array('error' => 'Configuration Niko IP manquante');
-        }
-        
-        // Utiliser le démon Python pour la communication MQTT
-        $socketport = config::byKey('socketport', 'nhc', '55001');
-        log::add('nhc', 'debug', 'Connexion au démon sur le port : ' . $socketport);
-        
-        // Vérifier que le démon est actif
-        $deamon_info = self::deamon_info();
-        if ($deamon_info['state'] != 'ok') {
-            log::add('nhc', 'error', 'Le démon nhc n\'est pas actif, impossible de découvrir via MQTT');
-            return array('error' => 'Démon nhc non actif');
-        }
-        
-        try {
-            // Connexion socket au démon Python
-            $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-            if ($socket === false) {
-                throw new Exception('Impossible de créer le socket : ' . socket_strerror(socket_last_error()));
-            }
-            
-            socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, array('sec' => 40, 'usec' => 0));
-            socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, array('sec' => 5, 'usec' => 0));
-            
-            $result = socket_connect($socket, '127.0.0.1', intval($socketport));
-            if ($result === false) {
-                throw new Exception('Impossible de se connecter au démon : ' . socket_strerror(socket_last_error($socket)));
-            }
-            
-            // Envoyer la commande de découverte au démon avec l'API key
-            $apikey = jeedom::getApiKey('nhc');
-            $command = json_encode(array(
-                'apikey' => $apikey,
-                'action' => 'discover_devices'
-            ));
-            
-            log::add('nhc', 'debug', 'Envoi commande découverte MQTT');
-            $sent = socket_write($socket, $command . "\n");
-            if ($sent === false) {
-                throw new Exception('Erreur envoi commande : ' . socket_strerror(socket_last_error($socket)));
-            }
-            
-            // Attendre la réponse complète
-            $response = '';
-            $timeout = time() + 35; // 35 secondes de timeout
-            $socket_error_count = 0;
-            while (time() < $timeout) {
-                $data = socket_read($socket, 4096, PHP_BINARY_READ);
-                if ($data === false) {
-                    $error = socket_strerror(socket_last_error($socket));
-                    log::add('nhc', 'error', 'Erreur lecture socket (discoverDevices): ' . $error);
-                    $socket_error_count++;
-                    if ($socket_error_count > 3 || $error !== 'Success') {
-                        throw new Exception('Erreur lecture socket : ' . $error);
-                    }
-                    usleep(100000); // Attendre 100ms
-                    continue;
-                }
-                if ($data === '' || $data === "\0") {
-                    usleep(100000); // Attendre 100ms
-                    continue;
-                }
-                $response .= $data;
-                // Vérifier si on a reçu une réponse JSON complète
-                $lines = explode("\n", trim($response));
-                foreach ($lines as $line) {
-                    $line = trim($line);
-                    if (!empty($line)) {
-                        $decoded = json_decode($line, true);
-                        if ($decoded !== null && isset($decoded['action']) && $decoded['action'] === 'discover_devices_response') {
-                            socket_close($socket);
-                            if (isset($decoded['devices'])) {
-                                log::add('nhc', 'info', 'Découverte MQTT réussie : ' . $decoded['count'] . ' appareils trouvés');
-                                log::add('nhc', 'debug', 'Appareils découverts : ' . print_r($decoded['devices'], true));
-                                return $decoded['devices'];
-                            } else {
-                                log::add('nhc', 'warning', 'Réponse découverte sans appareils');
-                                return array();
-                            }
-                        } elseif ($decoded === null) {
-                            log::add('nhc', 'error', 'Réponse non JSON ou incomplète : ' . $line);
-                        }
-                    }
-                }
-            }
-            socket_close($socket);
-            if (empty($response)) {
-                log::add('nhc', 'error', 'Aucune réponse du démon MQTT dans les temps (discoverDevices)');
-                return array('error' => 'Timeout de découverte MQTT');
-            }
-            log::add('nhc', 'error', 'Réponse MQTT invalide ou incomplète (discoverDevices) : ' . $response);
-            return array('error' => 'Réponse MQTT invalide');
-            
-        } catch (Exception $e) {
-            if (isset($socket) && is_resource($socket)) {
-                socket_close($socket);
-            }
-            log::add('nhc', 'error', 'Erreur lors de la découverte MQTT : ' . $e->getMessage());
-            return array('error' => 'Erreur découverte MQTT : ' . $e->getMessage());
-        }
+    log::add('nhc', 'debug', '=== DÉBUT discoverDevices() [SYNCHRONE via Cache] ===');
+
+    // Vérifier que le démon est actif
+    $deamon_info = self::deamon_info();
+    if ($deamon_info['state'] != 'ok') {
+      log::add('nhc', 'error', 'Le démon nhc n\'est pas actif, impossible de lancer la découverte.');
+      throw new Exception(__('Le démon nhc n\'est pas actif.', __FILE__));
+    }
+
+    // Générer un identifiant unique pour cette transaction de découverte
+    $transaction_id = uniqid('nhc_discover_');
+    $cache_key = 'nhc_discovery_result_' . $transaction_id;
+    cache::remove($cache_key);
+
+    // Envoyer la commande au démon avec l'ID de transaction
+    $socketport = config::byKey('socketport', 'nhc', '55001');
+    $apikey = jeedom::getApiKey('nhc');
+    $command = json_encode(array(
+      'apikey' => $apikey,
+      'action' => 'discover_devices',
+      'transaction_id' => $transaction_id
+    ));
+
+    try {
+      $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+      socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, array('sec' => 2, 'usec' => 0));
+      if (socket_connect($socket, '127.0.0.1', intval($socketport)) === false) {
+        throw new Exception('Impossible de se connecter au démon : ' . socket_strerror(socket_last_error($socket)));
+      }
+      if (socket_write($socket, $command . "\n") === false) {
+        throw new Exception('Erreur envoi commande : ' . socket_strerror(socket_last_error($socket)));
+      }
+      socket_close($socket);
+      log::add('nhc', 'info', 'Commande de découverte envoyée au démon avec transaction_id: ' . $transaction_id);
+    } catch (Exception $e) {
+      log::add('nhc', 'error', 'Erreur lors de l\'envoi de la commande de découverte : ' . $e->getMessage());
+      throw $e;
+    }
+
+    // Attendre la réponse via le cache (polling)
+    $timeout = 45; // 45 secondes de timeout total
+    $start_time = time();
+    while (time() - $start_time < $timeout) {
+      $result = cache::get($cache_key);
+      if ($result !== false) {
+        log::add('nhc', 'info', 'Réponse de découverte reçue via cache pour ' . $transaction_id . ': ' . $result);
+        cache::remove($cache_key); // Nettoyer le cache
+        return json_decode($result, true); // Renvoyer le résultat au front-end
+      }
+      usleep(500000); // Attendre 500ms avant de vérifier à nouveau
+    }
+
+    log::add('nhc', 'error', 'Timeout en attente de la réponse de découverte pour ' . $transaction_id);
+    throw new Exception(__('La découverte a expiré. Le démon n\'a pas répondu dans les temps. Vérifiez les logs.', __FILE__));
     }
 
     /*

@@ -87,6 +87,7 @@ function addCmdToTable(_cmd) {
 }
 
 $('#bt_scanNikoDevices').on('click', function () {
+  $('#div_alert').showAlert({ message: 'Lancement de la découverte des équipements Niko... Cette opération peut prendre jusqu\'à une minute.', level: 'info' });
   $.ajax({
     type: 'POST',
     url: 'plugins/nhc/core/ajax/nhc.ajax.php',
@@ -94,14 +95,27 @@ $('#bt_scanNikoDevices').on('click', function () {
       action: 'discoverDevices'
     },
     dataType: 'json',
+    timeout: 60000, // 60 secondes
     error: function (request, status, error) {
-      $('#div_alert').showAlert({ message: 'Erreur lors du scan des équipements Niko : ' + error, level: 'danger' });
+      if (status === 'timeout') {
+        $('#div_alert').showAlert({ message: 'La découverte a expiré. Le démon n\'a pas répondu dans les temps. Veuillez vérifier les logs.', level: 'danger' });
+      } else {
+        $('#div_alert').showAlert({ message: 'Erreur lors du scan des équipements Niko : ' + error, level: 'danger' });
+      }
     },
     success: function (data) {
       if (data.state !== 'ok') {
         $('#div_alert').showAlert({ message: 'Erreur lors du scan : ' + data.result, level: 'danger' });
       } else {
-        $('#div_alert').showAlert({ message: 'Scan terminé. Résultat : ' + JSON.stringify(data.result), level: 'success' });
+        var result = data.result;
+        if (result.status === 'ok') {
+          $('#div_alert').showAlert({ message: result.message, level: 'success' });
+          setTimeout(function() {
+            window.location.reload();
+          }, 2500);
+        } else {
+          $('#div_alert').showAlert({ message: 'Erreur de découverte : ' + result.message, level: 'danger' });
+        }
       }
     }
   });

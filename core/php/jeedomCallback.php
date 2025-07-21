@@ -16,7 +16,7 @@
  */
 
 try {
-    require_once dirname(__FILE__) . "/../../../../core/php/core.inc.php";
+    require_once dirname(__FILE__) . '/nhc.inc.php';
 
     if (!jeedom::apiAccess(init('apikey'), 'nhc')) {
         echo __('Vous n\'êtes pas autorisé à effectuer cette action', __FILE__);
@@ -33,7 +33,14 @@ try {
         die();
     }
     
-    log::add('nhc', 'debug', 'Message reçu du démon: ' . print_r($result, true));
+    // Masquage des champs sensibles avant log
+    $result_log = $result;
+    foreach(['apikey','token','jwt','niko_jwt'] as $sensitive) {
+        if (isset($result_log[$sensitive])) {
+            $result_log[$sensitive] = '[masqué]';
+        }
+    }
+    log::add('nhc', 'debug', 'Message reçu du démon: ' . print_r($result_log, true));
     
     if (isset($result['action'])) {
         switch ($result['action']) {
@@ -68,8 +75,6 @@ try {
             case 'mqtt_message':
                 // Traitement des messages MQTT pour mise à jour temps réel des équipements Jeedom
                 if (isset($result['topic']) && isset($result['data'])) {
-                    // Inclusion de la classe nhc si nécessaire
-                    require_once dirname(__FILE__) . '/../class/nhc.class.php';
                     // Délègue le traitement du message MQTT à la classe nhc
                     nhc::handleMqttMessage($result['topic'], $result['data']);
                 } else {
@@ -80,10 +85,22 @@ try {
                 
             case 'discover_devices_response':
                 // Réponse à la découverte d'équipements (liste complète)
+                $transaction_id = isset($result['transaction_id']) ? $result['transaction_id'] : null;
+                $error = isset($result['error']) ? $result['error'] : null;
+
+                if ($error) {
+                    log::add('nhc', 'error', 'Erreur de découverte reçue du démon: ' . $error);
+                    if ($transaction_id) {
+                        $response_data = json_encode(['status' => 'error', 'message' => $error]);
+                        cache::set('nhc_discovery_result_' . $transaction_id, $response_data, 60);
+                    }
+                    break;
+                }
+
                 if (isset($result['devices']) && is_array($result['devices'])) {
                     log::add('nhc', 'info', 'Liste des équipements découverts reçue : ' . count($result['devices']) . ' équipements');
-                    // Inclusion de la classe nhc pour la gestion des équipements
-                    require_once dirname(__FILE__) . '/../class/nhc.class.php';
+                    $created_count = 0;
+                    $updated_count = 0;
                     foreach ($result['devices'] as $device) {
                         // Récupération du UUID ou ID de l'équipement
                         $uuid = isset($device['uuid']) ? $device['uuid'] : (isset($device['id']) ? $device['id'] : null);
@@ -130,6 +147,7 @@ try {
                                 // Sauvegarde de l'équipement dans Jeedom
                                 $eqLogic->save();
                                 log::add('nhc', 'info', 'Création nouvel équipement : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
+                                $created_count++;
                                 // Ajout des commandes pour les volets si smartmotor ou rolldownshutter
                                 if ($type === 'action' && $model === 'rolldownshutter') {
                                     nhc::addVoletCommands($eqLogic);
@@ -143,20 +161,29 @@ try {
                         else{
                             log::add('nhc', 'info', 'Équipement déjà existant : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
                             // TODO : mise à jours de l'équipement si nécessaire
+                            $updated_count++;
                         }
+                    }
+                    if ($transaction_id) {
+                        $message = sprintf(
+                            __('%s équipements créés, %s équipements déjà existants. La page va maintenant se rafraîchir.', __FILE__),
+                            $created_count,
+                            $updated_count
+                        );
+                        $response_data = json_encode(['status' => 'ok', 'message' => $message]);
+                        log::add('nhc', 'debug', 'Stockage du résultat de la découverte dans le cache pour ' . $transaction_id);
+                        cache::set('nhc_discovery_result_' . $transaction_id, $response_data, 60);
                     }
                 } else {
                     log::add('nhc', 'warning', 'discover_devices_response sans liste d\'équipements');
+                    if ($transaction_id) {
+                        $message = __('Aucun nouvel équipement compatible trouvé.', __FILE__);
+                        $response_data = json_encode(['status' => 'ok', 'message' => $message]);
+                        cache::set('nhc_discovery_result_' . $transaction_id, $response_data, 60);
+                    }
                 }
                 log::add('nhc', 'debug', 'Fin du traitement discover_devices_response');
-                // Fin du traitement : renvoyer une réponse JSON attendue par Jeedom
-                echo json_encode([
-                    'action' => 'discover_devices_response',
-                    'devices' => isset($result['devices']) ? $result['devices'] : [],
-                    'count' => isset($result['count']) ? $result['count'] : (isset($result['devices']) ? count($result['devices']) : 0)
-                ]);
-                exit;
-                
+                break;
             default:
                 log::add('nhc', 'debug', 'Action non gérée: ' . $result['action']);
                 break;
@@ -165,7 +192,7 @@ try {
         log::add('nhc', 'debug', 'Message reçu du démon sans action définie');
     }
     
-} catch (Exception $e) {
+} catch (Throwable $e) {
     log::add('nhc', 'error', displayException($e));
 }
 ?>

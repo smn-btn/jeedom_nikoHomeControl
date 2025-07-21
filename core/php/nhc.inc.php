@@ -16,6 +16,7 @@
 */
 
 require_once __DIR__  . '/../../../../core/php/core.inc.php';
+require_once __DIR__ . '/../class/nhc.class.php';
 /*
 *
 * Fichier d’inclusion si vous avez plusieurs fichiers de class ou 3rdParty à inclure
