@@ -120,26 +120,31 @@ def on_message(client, userdata, msg):
         try:
             message_data = json.loads(payload)
             logging.debug("📊 Données parsées: %s", message_data)
-            
-            # Traiter selon le type de topic
-            if '/evt/' in topic:
-                # Événement de changement d'état
-                handle_device_event(topic, message_data)
-            elif '/rsp/' in topic:
-                # Réponse à une commande
-                handle_command_response(topic, message_data)
-            else:
-                # Autre type de message
-                logging.debug("🔄 Message non traité: %s", topic)
-            
+
             # Envoyer le message brut à Jeedom pour traitement complémentaire
+            # C'est la logique principale, car le PHP a la logique la plus à jour.
             if jeedom_com_instance:
                 jeedom_com_instance.send_change_immediate({
                     'action': 'mqtt_message',
                     'topic': topic,
                     'data': message_data
                 })
-                
+
+            # La logique ci-dessous est pour un logging plus précis côté démon.
+            method = message_data.get('Method')
+
+            if method in ['devices.list', 'devices.status']:
+                # Message de liste ou de statut, qui peut arriver sur n'importe quel topic
+                handle_command_response(topic, message_data)
+            elif topic.startswith('hobby/control/devices/evt'):
+                # Événement de changement d'état pour un appareil spécifique
+                handle_device_event(topic, message_data)
+            elif topic.startswith('hobby/control/devices/rsp'):
+                # Autre type de réponse non couverte par la méthode
+                handle_command_response(topic, message_data)
+            else:
+                logging.debug("🔄 Message non classifié par le démon (mais transmis à Jeedom): %s", topic)
+
         except json.JSONDecodeError:
             logging.debug("📄 Message non-JSON reçu: %s", payload)
             
@@ -176,28 +181,29 @@ def handle_device_event(topic, data):
         logging.error("❌ Erreur traitement événement: %s", e)
 
 def handle_command_response(topic, data):
-    """Traite une réponse à une commande sur hobby/control/devices/rsp"""
-    logging.info("📋 Réponse reçue sur %s: %s", topic, data)
-    
+    """Traite une réponse à une commande ou un message de statut."""
+    method = data.get('Method', '')
+    logging.info("📋 Traitement d'un message de type '%s' sur le topic %s", method, topic)
+
     try:
-        method = data.get('Method', '')
-        
-        if method == 'devices.list':
-            # Réponse à une demande de liste d'appareils
-            logging.info("📋 Réponse devices.list reçue")
-            params = data.get('Params', {})
+        if method in ['devices.list', 'devices.status']:
+            # Réponse à une demande de liste d'appareils ou un statut global
+            logging.info("📋 Message de type %s reçu.", method)
+            params = data.get('Params', [{}])[0]
             devices = params.get('Devices', [])
-            
-            logging.info("📊 Nombre d'appareils dans la liste: %d", len(devices))
-            
-            # Envoyer la liste à Jeedom
-            jeedom_com_instance.send_change_immediate({
-                'action': 'devices_list_received',
-                'devices': devices,
-                'count': len(devices),
-                'raw_data': data
-            })
-            
+
+            logging.info("📊 Nombre d'appareils dans le message: %d", len(devices))
+
+            # L'envoi à Jeedom est déjà fait dans on_message via 'mqtt_message'.
+            # L'action 'devices_list_received' n'est pas gérée par le callback PHP.
+            # if method == 'devices.list':
+            #     jeedom_com_instance.send_change_immediate({
+            #         'action': 'devices_list_received',
+            #         'devices': devices,
+            #         'count': len(devices),
+            #         'raw_data': data
+            #     })
+
         elif method == 'devices.control':
             # Réponse à une commande de contrôle
             if 'Error' in data or 'error' in data:
@@ -220,14 +226,15 @@ def handle_command_response(topic, data):
                 })
         else:
             # Autre type de réponse
-            logging.debug("🔄 Réponse non traitée (méthode: %s)", method)
-            
-            jeedom_com_instance.send_change_immediate({
-                'action': 'command_response',
-                'method': method,
-                'raw_data': data
-            })
-            
+            logging.debug("🔄 Méthode '%s' non gérée spécifiquement par le démon (traitement délégué à Jeedom).", method)
+
+            # L'action 'command_response' n'est pas gérée par le callback PHP.
+            # jeedom_com_instance.send_change_immediate({
+            #     'action': 'command_response',
+            #     'method': method,
+            #     'raw_data': data
+            # })
+
     except Exception as e:
         logging.error("❌ Erreur traitement réponse: %s", e)
 

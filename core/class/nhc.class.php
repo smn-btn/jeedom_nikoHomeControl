@@ -535,61 +535,114 @@ class nhc extends eqLogic {
     /*
     * Gère la réception d'un message MQTT pour la mise à jour temps réel des équipements
     */
-    public static function handleMqttMessage($topic, $data) {
-        log::add('nhc', 'debug', 'Traitement mqtt_message sur topic: ' . $topic . ' | data: ' . print_r($data, true));
-        if (!isset($data['Params'][0]['Devices']) || !is_array($data['Params'][0]['Devices'])) {
-            log::add('nhc', 'warning', 'Aucun device à traiter dans mqtt_message');
-            return;
-        }
-        foreach ($data['Params'][0]['Devices'] as $device) {
-            if (!isset($device['Uuid'])) continue;
-            $uuid = $device['Uuid'];
-            $eqLogic = eqLogic::byTypeAndSearhConfiguration('nhc', 'uuid', $uuid, '1');
-            if (is_array($eqLogic) && count($eqLogic) > 0) {
-                $eqLogic = $eqLogic[0];
-                log::add('nhc', 'debug', 'Mise à jour de l\'équipement Jeedom pour Uuid: ' . $uuid . ' (ID: ' . $eqLogic->getId() . ')');
-                // Mise à jour de l'état Online si présent
-                if (isset($device['Online'])) {
-                    $cmd = $eqLogic->getCmd(null, 'online');
-                    if (is_object($cmd)) {
-                        $cmd->event($device['Online'] === 'True' ? 1 : 0);
-                        log::add('nhc', 'debug', 'Mise à jour cmd online: ' . $device['Online']);
-                    }
-                }
-                // Mise à jour des propriétés si présentes
-                if (isset($device['Properties']) && is_array($device['Properties'])) {
-                    foreach ($device['Properties'] as $prop) {
-                        foreach ($prop as $key => $value) {
-                            $cmd = $eqLogic->getCmd(null, strtolower($key));
-                            if (is_object($cmd)) {
-                                $cmd->event($value);
-                                log::add('nhc', 'debug', 'Mise à jour cmd ' . strtolower($key) . ': ' . $value);
-                            }
-                        }
-                    }
-                }
-            } else {
-                log::add('nhc', 'debug', 'Aucun équipement Jeedom trouvé pour Uuid: ' . $uuid);
-            }
-        }
-    }
+	public static function handleMqttMessage($topic, $data) {
+		log::add('nhc', 'debug', 'Traitement mqtt_message sur topic: ' . $topic . ' | data: ' . print_r($data, true));
+
+		// Cas 1: Réponse à devices.list ou devices.status, qui contient une liste d'appareils
+		if (isset($data['Method']) && in_array($data['Method'], ['devices.list', 'devices.status']) && isset($data['Params'][0]['Devices'])) {
+			log::add('nhc', 'debug', 'Traitement d\'une réponse de type ' . $data['Method']);
+			foreach ($data['Params'][0]['Devices'] as $deviceData) {
+				self::updateDeviceFromMqttData($deviceData);
+			}
+			return;
+		}
+
+		// Cas 2: Événement pour un seul appareil (ex: hobby/control/devices/evt/...)
+		$uuid = null;
+		$properties = null;
+
+		// Extraire l'UUID du topic
+		if (preg_match('/hobby\/control\/devices\/(evt|rsp)\/([a-f0-9\-]+)/', $topic, $matches)) {
+			$uuid = $matches[2];
+		}
+		// Ou du payload si le topic ne le contient pas
+		if (!$uuid) {
+			if (isset($data['Uuid'])) {
+				$uuid = $data['Uuid'];
+			} elseif (isset($data['uuid'])) {
+				$uuid = $data['uuid'];
+			}
+		}
+
+		// Extraire les propriétés du payload
+		if (isset($data['Properties']) && is_array($data['Properties'])) {
+			$properties = $data['Properties'];
+		}
+
+		if ($uuid && $properties) {
+			log::add('nhc', 'debug', 'Traitement d\'un événement pour l\'appareil UUID: ' . $uuid);
+			$deviceData = [
+				'Uuid' => $uuid,
+				'Properties' => $properties
+			];
+			if (isset($data['Online'])) {
+				$deviceData['Online'] = $data['Online'];
+			}
+			self::updateDeviceFromMqttData($deviceData);
+		} else {
+			log::add('nhc', 'warning', 'Message MQTT non traité, structure inconnue ou UUID/Properties manquant. Topic: ' . $topic);
+		}
+	}
+
+	/**
+	 * Met à jour un équipement Jeedom à partir des données d'un appareil Niko.
+	 * @param array $deviceData Données de l'appareil contenant au minimum Uuid et Properties.
+	 */
+	private static function updateDeviceFromMqttData($deviceData) {
+		if (!isset($deviceData['Uuid'])) {
+			return;
+		}
+		$uuid = $deviceData['Uuid'];
+		$eqLogic = eqLogic::byLogicalId($uuid, 'nhc');
+		if (is_object($eqLogic)) {
+			log::add('nhc', 'debug', 'Mise à jour de l\'équipement Jeedom ' . $eqLogic->getHumanName() . ' (UUID: ' . $uuid . ')');
+
+			if (isset($deviceData['Online'])) {
+				$value = ($deviceData['Online'] === 'True' || $deviceData['Online'] === true) ? 1 : 0;
+				$eqLogic->checkAndUpdateCmd('online', $value);
+			}
+
+			if (isset($deviceData['Properties']) && is_array($deviceData['Properties'])) {
+				foreach ($deviceData['Properties'] as $prop) {
+					foreach ($prop as $key => $value) {
+						$cmdLogicalId = strtolower($key);
+						$originalValue = is_array($value) || is_object($value) ? json_encode($value) : $value;
+						if (is_string($value)) {
+							$lowerValue = strtolower($value);
+							if ($lowerValue === 'on' || $lowerValue === 'true') {
+								$value = 1;
+							} elseif ($lowerValue === 'off' || $lowerValue === 'false') {
+								$value = 0;
+							}
+						}
+						$eqLogic->checkAndUpdateCmd($cmdLogicalId, $value);
+						log::add('nhc', 'debug', 'Mise à jour cmd ' . $cmdLogicalId . ': ' . $originalValue . ' -> ' . $value);
+					}
+				}
+			}
+		}
+	}
 
     /**
      * Ajoute les commandes Jeedom pour un volet (smartmotor) à un équipement nhc
      * @param nhc $eqLogic
      */
     public static function addVoletCommands($eqLogic) {
-        // Etat
-        if (!is_object($eqLogic->getCmd(null, 'etat'))) {
-            $cmd = new nhcCmd();
-            $cmd->setName('Etat');
-            $cmd->setEqLogic_id($eqLogic->getId());
-            $cmd->setLogicalId('etat');
-            $cmd->setType('info');
-            $cmd->setSubType('binary');
-            $cmd->setIsHistorized(1);
-            $cmd->setConfiguration('jeedom_cmd_type', 'Info/Volet Etat');
-            $cmd->save();
+        // Position (info)
+        $positionCmd = $eqLogic->getCmd(null, 'position');
+        if (!is_object($positionCmd)) {
+            $positionCmd = new nhcCmd();
+            $positionCmd->setName('État Position');
+            $positionCmd->setEqLogic_id($eqLogic->getId());
+            $positionCmd->setLogicalId('position');
+            $positionCmd->setType('info');
+            $positionCmd->setSubType('numeric');
+            $positionCmd->setIsHistorized(1);
+            $positionCmd->setUnite('%');
+            $positionCmd->setConfiguration('minValue', 0);
+            $positionCmd->setConfiguration('maxValue', 100);
+            $positionCmd->setConfiguration('jeedom_cmd_type', 'Info/Volet Etat');
+            $positionCmd->save();
         }
         // Monter
         if (!is_object($eqLogic->getCmd(null, 'up'))) {
@@ -625,17 +678,22 @@ class nhc extends eqLogic {
             $cmd->save();
         }
         // Slider (optionnel, pour gestion du pourcentage)
-        if (!is_object($eqLogic->getCmd(null, 'slider'))) {
-            $cmd = new nhcCmd();
-            $cmd->setName('Position');
-            $cmd->setEqLogic_id($eqLogic->getId());
-            $cmd->setLogicalId('slider');
-            $cmd->setType('action');
-            $cmd->setSubType('slider');
-            $cmd->setConfiguration('minValue', 0);
-            $cmd->setConfiguration('maxValue', 100);
-            $cmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Slider');
-            $cmd->save();
+        $sliderCmd = $eqLogic->getCmd(null, 'slider');
+        if (!is_object($sliderCmd)) {
+            $sliderCmd = new nhcCmd();
+            $sliderCmd->setName('Position');
+            $sliderCmd->setEqLogic_id($eqLogic->getId());
+            $sliderCmd->setLogicalId('slider');
+            $sliderCmd->setType('action');
+            $sliderCmd->setSubType('slider');
+            $sliderCmd->setConfiguration('minValue', 0);
+            $sliderCmd->setConfiguration('maxValue', 100);
+            $sliderCmd->setConfiguration('jeedom_cmd_type', 'Action/Volet Bouton Slider');
+            $sliderCmd->setValue($positionCmd->getId());
+            $sliderCmd->save();
+        } else {
+            $sliderCmd->setValue($positionCmd->getId());
+            $sliderCmd->save();
         }
     }
 }
