@@ -60,3 +60,10 @@ Vérifiez les points suivants :
 - Vérifiez que le démon est toujours en cours d'exécution.
 - Consultez les logs `nhc` en mode debug pour voir les commandes envoyées et les messages reçus du contrôleur Niko.
 
+
+# A venir dans les prochaines versions :
+- equipement compatible avec le type générique volets
+- gestion des commandes des prise connectées
+- refresh du php après le scan
+- widget
+- rajouter une alerte pour la fin de validity du token
