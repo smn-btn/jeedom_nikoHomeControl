@@ -73,4 +73,3 @@ Vérifiez les points suivants :
 ## Prochaines évolutions
 -   Prise en charge des prises connectées (`socket`).
 -   Ajout d'une alerte pour notifier l'utilisateur avant l'expiration du token d'accès (JWT).
--   mise à jours de l'équipement après un nouveau scan

@@ -13,4 +13,3 @@
 - Gestion des dépendances et du démon Python.
 - Découverte des équipements via l'API Hobby MQTT.
 - Support des volets roulants (`rolldownshutter`).
-
