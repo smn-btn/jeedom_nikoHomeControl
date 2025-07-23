@@ -586,6 +586,8 @@ class nhc extends eqLogic {
             $positionCmd->setConfiguration('minValue', 0);
             $positionCmd->setConfiguration('maxValue', 100);
             $positionCmd->setConfiguration('jeedom_cmd_type', 'Info/Volet Etat');
+            $positionCmd->setTemplate('dashboard', 'core::shutter');
+            $positionCmd->setTemplate('mobile', 'core::shutter');
             $positionCmd->save();
         }
         // Monter
