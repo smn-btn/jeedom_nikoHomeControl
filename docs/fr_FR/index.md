@@ -73,3 +73,5 @@ Vérifiez les points suivants :
 ## Prochaines évolutions
 -   Prise en charge des prises connectées (`socket`).
 -   Ajout d'une alerte pour notifier l'utilisateur avant l'expiration du token d'accès (JWT).
+- supression du template personalisé inutilisé
+- categorie des equipement volet : "opening":"1","
