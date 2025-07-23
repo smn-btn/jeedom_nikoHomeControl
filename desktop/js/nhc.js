@@ -98,10 +98,13 @@ $('#bt_scanNikoDevices').on('click', function () {
       $('#div_alert').showAlert({ message: 'Erreur lors du scan des équipements Niko : ' + error, level: 'danger' });
     },
     success: function (data) {
+      // La découverte se fait en arrière-plan. On affiche juste un message de confirmation.
       if (data.state !== 'ok') {
-        $('#div_alert').showAlert({ message: 'Erreur lors du scan : ' + data.result, level: 'danger' });
+        var errorMessage = (typeof data.result === 'object' && data.result !== null && data.result.error) ? data.result.error : data.result;
+        $('#div_alert').showAlert({ message: 'Erreur lors du lancement du scan : ' + errorMessage, level: 'danger' });
       } else {
-        $('#div_alert').showAlert({ message: 'Scan terminé. Résultat : ' + JSON.stringify(data.result), level: 'success' });
+        var successMessage = (typeof data.result === 'object' && data.result !== null && data.result.message) ? data.result.message : 'Scan lancé avec succès. Rafraîchissez la page dans quelques instants.';
+        $('#div_alert').showAlert({ message: successMessage, level: 'success' });
       }
     }
   });
