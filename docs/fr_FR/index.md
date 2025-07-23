@@ -41,8 +41,17 @@ Un rafraîchissement de la page peut être nécessaire pour voir les nouveaux é
 ### Équipements compatibles
 
 Le plugin supporte actuellement les types d'équipements suivants :
--   Volets roulants / Stores (`rolldownshutter`)
--   à venir : Prises connectées (`socket`)
+
+#### Volets roulants / Stores (`rolldownshutter`)
+
+Les équipements de type volet sont automatiquement créés avec les commandes suivantes :
+-   **Monter** : Ouvre complètement le volet.
+-   **Descendre** : Ferme complètement le volet.
+-   **Stop** : Arrête le mouvement du volet.
+-   **Position** (Action) : Permet de définir une position précise (de 0% à 100%) via un curseur.
+-   **État Position** (Info) : Donne la position actuelle du volet.
+
+Grâce à l'utilisation des types génériques, l'équipement est compatible avec les widgets de volet standards de Jeedom et l'application mobile.
 
 ## FAQ
 
@@ -61,9 +70,7 @@ Vérifiez les points suivants :
 - Consultez les logs `nhc` en mode debug pour voir les commandes envoyées et les messages reçus du contrôleur Niko.
 
 
-# A venir dans les prochaines versions :
-- equipement compatible avec le type générique volets
-- gestion des commandes des prise connectées
-- refresh du php après le scan
-- widget
-- rajouter une alerte pour la fin de validity du token
+## Prochaines évolutions
+-   Prise en charge des prises connectées (`socket`).
+-   Ajout d'une alerte pour notifier l'utilisateur avant l'expiration du token d'accès (JWT).
+-   mise à jours de l'équipement après un nouveau scan
