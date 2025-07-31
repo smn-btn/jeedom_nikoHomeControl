@@ -424,113 +424,57 @@ class nhc extends eqLogic {
   * Permet de découvrir les appareils via MQTT Niko Home Control
   */
   public static function discoverDevices() {
-        log::add('nhc', 'debug', '=== DÉBUT discoverDevices() via MQTT ===');
-        
-        // Vérification de la configuration
-        $niko_ip = config::byKey('niko_ip', 'nhc', '');
-        if (empty($niko_ip)) {
-            log::add('nhc', 'error', 'Configuration Niko IP manquante');
-            return array('error' => 'Configuration Niko IP manquante');
-        }
-        
-        // Utiliser le démon Python pour la communication MQTT
-        $socketport = config::byKey('socketport', 'nhc', '55001');
-        log::add('nhc', 'debug', 'Connexion au démon sur le port : ' . $socketport);
-        
-        // Vérifier que le démon est actif
-        $deamon_info = self::deamon_info();
-        if ($deamon_info['state'] != 'ok') {
-            log::add('nhc', 'error', 'Le démon nhc n\'est pas actif, impossible de découvrir via MQTT');
-            return array('error' => 'Démon nhc non actif');
-        }
-        
-        try {
-            // Connexion socket au démon Python
-            $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-            if ($socket === false) {
-                throw new Exception('Impossible de créer le socket : ' . socket_strerror(socket_last_error()));
-            }
-            
-            socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, array('sec' => 40, 'usec' => 0));
-            socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, array('sec' => 5, 'usec' => 0));
-            
-            $result = socket_connect($socket, '127.0.0.1', intval($socketport));
-            if ($result === false) {
-                throw new Exception('Impossible de se connecter au démon : ' . socket_strerror(socket_last_error($socket)));
-            }
-            
-            // Envoyer la commande de découverte au démon avec l'API key
-            $apikey = jeedom::getApiKey('nhc');
-            $command = json_encode(array(
-                'apikey' => $apikey,
-                'action' => 'discover_devices'
-            ));
-            
-            log::add('nhc', 'debug', 'Envoi commande découverte MQTT');
-            $sent = socket_write($socket, $command . "\n");
-            if ($sent === false) {
-                throw new Exception('Erreur envoi commande : ' . socket_strerror(socket_last_error($socket)));
-            }
-            
-            // Attendre la réponse complète
-            $response = '';
-            $timeout = time() + 35; // 35 secondes de timeout
-            $socket_error_count = 0;
-            while (time() < $timeout) {
-                $data = socket_read($socket, 4096, PHP_BINARY_READ);
-                if ($data === false) {
-                    $error = socket_strerror(socket_last_error($socket));
-                    log::add('nhc', 'error', 'Erreur lecture socket (discoverDevices): ' . $error);
-                    $socket_error_count++;
-                    if ($socket_error_count > 3 || $error !== 'Success') {
-                        throw new Exception('Erreur lecture socket : ' . $error);
-                    }
-                    usleep(100000); // Attendre 100ms
-                    continue;
-                }
-                if ($data === '' || $data === "\0") {
-                    usleep(100000); // Attendre 100ms
-                    continue;
-                }
-                $response .= $data;
-                // Vérifier si on a reçu une réponse JSON complète
-                $lines = explode("\n", trim($response));
-                foreach ($lines as $line) {
-                    $line = trim($line);
-                    if (!empty($line)) {
-                        $decoded = json_decode($line, true);
-                        if ($decoded !== null && isset($decoded['action']) && $decoded['action'] === 'discover_devices_response') {
-                            socket_close($socket);
-                            if (isset($decoded['devices'])) {
-                                log::add('nhc', 'info', 'Découverte MQTT réussie : ' . $decoded['count'] . ' appareils trouvés');
-                                log::add('nhc', 'debug', 'Appareils découverts : ' . print_r($decoded['devices'], true));
-                                return $decoded['devices'];
-                            } else {
-                                log::add('nhc', 'warning', 'Réponse découverte sans appareils');
-                                return array();
-                            }
-                        } elseif ($decoded === null) {
-                            log::add('nhc', 'error', 'Réponse non JSON ou incomplète : ' . $line);
-                        }
-                    }
-                }
-            }
-            socket_close($socket);
-            if (empty($response)) {
-                log::add('nhc', 'error', 'Aucune réponse du démon MQTT dans les temps (discoverDevices)');
-                return array('error' => 'Timeout de découverte MQTT');
-            }
-            log::add('nhc', 'error', 'Réponse MQTT invalide ou incomplète (discoverDevices) : ' . $response);
-            return array('error' => 'Réponse MQTT invalide');
-            
-        } catch (Exception $e) {
-            if (isset($socket) && is_resource($socket)) {
-                socket_close($socket);
-            }
-            log::add('nhc', 'error', 'Erreur lors de la découverte MQTT : ' . $e->getMessage());
-            return array('error' => 'Erreur découverte MQTT : ' . $e->getMessage());
-        }
+    log::add('nhc', 'debug', '=== DÉBUT discoverDevices() via MQTT ===');
+
+    // Vérifier que le démon est actif
+    $deamon_info = self::deamon_info();
+    if ($deamon_info['state'] != 'ok') {
+      log::add('nhc', 'error', 'Le démon nhc n\'est pas actif, impossible de lancer la découverte');
+      return array('error' => 'Le démon n\'est pas démarré.');
     }
+
+    // La découverte est asynchrone. On envoie juste la commande au démon.
+    // Le démon enverra les résultats au callback PHP.
+    try {
+      $socketport = config::byKey('socketport', 'nhc', '55001');
+      $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+      if ($socket === false) {
+        throw new Exception('socket_create() a échoué: ' . socket_strerror(socket_last_error()));
+      }
+
+      // Timeout court pour la connexion et l'envoi
+      socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, array('sec' => 2, 'usec' => 0));
+
+      $result = socket_connect($socket, '127.0.0.1', intval($socketport));
+      if ($result === false) {
+        throw new Exception('socket_connect() a échoué: ' . socket_strerror(socket_last_error($socket)));
+      }
+
+      $apikey = jeedom::getApiKey('nhc');
+      $command = json_encode(array(
+        'apikey' => $apikey,
+        'action' => 'discover_devices'
+      ));
+
+      log::add('nhc', 'debug', 'Envoi de la commande de découverte au démon');
+      $sent = socket_write($socket, $command . "\n");
+      if ($sent === false) {
+        throw new Exception('socket_write() a échoué: ' . socket_strerror(socket_last_error($socket)));
+      }
+
+      socket_close($socket);
+
+      log::add('nhc', 'info', 'Commande de découverte envoyée au démon. Les résultats arriveront de manière asynchrone.');
+      return array('message' => 'Scan en cours. Les équipements apparaîtront d\'ici quelques secondes. Veuillez rafraîchir la page.');
+
+    } catch (Exception $e) {
+      if (isset($socket) && is_resource($socket)) {
+        socket_close($socket);
+      }
+      log::add('nhc', 'error', 'Erreur lors de l\'envoi de la commande de découverte : ' . $e->getMessage());
+      return array('error' => 'Erreur de communication avec le démon : ' . $e->getMessage());
+    }
+  }
 
     /*
     * Gère la réception d'un message MQTT pour la mise à jour temps réel des équipements
@@ -642,6 +586,8 @@ class nhc extends eqLogic {
             $positionCmd->setConfiguration('minValue', 0);
             $positionCmd->setConfiguration('maxValue', 100);
             $positionCmd->setConfiguration('jeedom_cmd_type', 'Info/Volet Etat');
+            $positionCmd->setTemplate('dashboard', 'core::shutter');
+            $positionCmd->setTemplate('mobile', 'core::shutter');
             $positionCmd->save();
         }
         // Monter

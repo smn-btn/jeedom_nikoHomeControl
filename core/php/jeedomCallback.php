@@ -148,8 +148,22 @@ try {
                             }
                         }
                         else{
-                            log::add('nhc', 'info', 'Équipement déjà existant : ' . $device['name'] . ' (UUID: ' . $uuid . ')');
-                            // TODO : mise à jours de l'équipement si nécessaire
+                            log::add('nhc', 'info', 'Équipement déjà existant : ' . $device['name'] . ' (UUID: ' . $uuid . '), mise à jour...');
+                            $eqLogic->setName($device['name']);
+                            $eqLogic->setConfiguration('location', isset($device['location']) ? $device['location'] : '');
+                            $eqLogic->setConfiguration('raw_data', isset($device['raw_data']) ? $device['raw_data'] : array());
+                            $eqLogic->setConfiguration('lastCommunication',date('Y-m-d H:i:s'));
+
+                            try {
+                                $eqLogic->save();
+                                // Vérifier et ajouter les commandes si elles manquent
+                                if ($type === 'action' && $model === 'rolldownshutter') {
+                                    nhc::addVoletCommands($eqLogic);
+                                }
+                            } catch (Exception $e) {
+                                log::add('nhc', 'error', 'Erreur lors de la mise à jour de l\'équipement : ' . $e->getMessage());
+                                continue;
+                            }
                         }
                     }
                 } else {
