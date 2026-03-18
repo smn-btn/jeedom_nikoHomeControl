@@ -1,7 +1,12 @@
 # Changelog Niko Home Control - beta
 
+# 18/03/2026 - v1.1
+- Reconnexion automatique MQTT en cas de perte de connexion (ex: coupure de courant simultanée de Jeedom et de la box Niko).
+- Vérification périodique de l'état de la connexion MQTT dans la boucle principale du démon.
+- Le démon est désormais importable en tant que module Python (protection `if __name__ == '__main__'`), permettant les tests unitaires.
+
 # 26/11/2025 - v1.0
-- clean des paramêtre non utilisé pour déploiement 
+- clean des paramêtre non utilisé pour déploiement
 
 # 24/07/2025 - v0.3
 - Mise à jour des équipements existants lors d'un nouveau scan pour refléter les changements (nom, etc.).

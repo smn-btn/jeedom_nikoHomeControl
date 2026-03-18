@@ -69,6 +69,10 @@ Vérifiez les points suivants :
 - Vérifiez que le démon est toujours en cours d'exécution.
 - Consultez les logs `nhc` en mode debug pour voir les commandes envoyées et les messages reçus du contrôleur Niko.
 
+**Après une coupure de courant, le plugin ne communique plus avec Niko**
+- Le plugin intègre une reconnexion automatique au broker MQTT de la box Niko. Si Jeedom et la box Niko redémarrent en même temps (coupure de courant), la connexion MQTT sera automatiquement rétablie dès que la box Niko sera de nouveau disponible (vérification toutes les 30 secondes).
+- Consultez les logs `nhc` pour vérifier que la reconnexion s'est bien effectuée (message `✅ Reconnexion MQTT réussie`).
+
 
 ## Prochaines évolutions
 -   Prise en charge des prises connectées (`socket`).
