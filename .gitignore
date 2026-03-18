@@ -18,9 +18,6 @@ docs/.sass-cache/
 venv/
 env/
 
-# Fichiers de test temporaires
-test_*.php
-test_*.py
 
 # Logs et fichiers temporaires
 *.log

@@ -62,8 +62,65 @@ class nhc extends eqLogic {
 
   /*
   * Fonction exécutée automatiquement tous les jours par Jeedom
-  public static function cronDaily() {}
+  * Vérifie l'expiration du token JWT Niko Home Control
   */
+  public static function cronDaily() {
+    self::checkJwtExpiration();
+  }
+
+  /**
+   * Vérifie si le token JWT est proche de l'expiration et alerte l'utilisateur
+   * @param int $alertDays Nombre de jours avant expiration pour déclencher l'alerte (défaut: 30)
+   */
+  public static function checkJwtExpiration($alertDays = 30) {
+    $niko_jwt = config::byKey('niko_jwt', 'nhc', '');
+    if (empty($niko_jwt)) {
+      return;
+    }
+
+    $parts = explode('.', $niko_jwt);
+    if (count($parts) !== 3) {
+      log::add('nhc', 'warning', 'Le token JWT n\'a pas un format valide (3 parties attendues)');
+      return;
+    }
+
+    // Décodage de la partie payload (base64url)
+    $payload = $parts[1];
+    // base64url -> base64
+    $payload = str_replace(array('-', '_'), array('+', '/'), $payload);
+    $decoded = base64_decode($payload, true);
+    if ($decoded === false) {
+      log::add('nhc', 'warning', 'Impossible de décoder le payload du token JWT');
+      return;
+    }
+
+    $data = json_decode($decoded, true);
+    if (!is_array($data) || !isset($data['exp'])) {
+      log::add('nhc', 'warning', 'Le token JWT ne contient pas de date d\'expiration (champ "exp")');
+      return;
+    }
+
+    $expTimestamp = intval($data['exp']);
+    $now = time();
+    $daysRemaining = ($expTimestamp - $now) / 86400;
+
+    // Supprime les anciens messages d'alerte JWT
+    message::removeAll('nhc', 'jwtExpiration');
+
+    if ($daysRemaining <= 0) {
+      $expDate = date('d/m/Y H:i', $expTimestamp);
+      log::add('nhc', 'error', 'Le token JWT Niko Home Control a expiré le ' . $expDate);
+      message::add('nhc', 'Le token JWT Niko Home Control a expiré le ' . $expDate . '. Veuillez le renouveler dans la configuration du plugin.', '', 'jwtExpiration');
+    } elseif ($daysRemaining <= $alertDays) {
+      $daysInt = intval(ceil($daysRemaining));
+      $expDate = date('d/m/Y H:i', $expTimestamp);
+      log::add('nhc', 'warning', 'Le token JWT Niko Home Control expire dans ' . $daysInt . ' jour(s) (le ' . $expDate . ')');
+      message::add('nhc', 'Le token JWT Niko Home Control expire dans ' . $daysInt . ' jour(s) (le ' . $expDate . '). Pensez à le renouveler dans la configuration du plugin.', '', 'jwtExpiration');
+    } else {
+      $daysInt = intval(floor($daysRemaining));
+      log::add('nhc', 'info', 'Token JWT Niko Home Control valide encore ' . $daysInt . ' jour(s)');
+    }
+  }
 
   /*
   * Permet de récupérer les informations sur le démon
@@ -209,6 +266,8 @@ class nhc extends eqLogic {
       return false;
     }
     message::removeAll('nhc', 'unableStartDeamon');
+    // Vérifier l'expiration du token JWT au démarrage du démon
+    self::checkJwtExpiration();
     log::add('nhc', 'debug', '=== FIN deamon_start() - SUCCÈS ===');
     return true;
   }

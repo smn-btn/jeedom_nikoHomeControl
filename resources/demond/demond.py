@@ -35,6 +35,8 @@ from jeedom.jeedom import jeedom_socket, jeedom_utils, jeedom_com, JEEDOM_SOCKET
 jeedom_socket_instance = None
 jeedom_com_instance = None
 mqtt_client_instance = None
+_last_mqtt_reconnect_attempt = 0
+MQTT_RECONNECT_COOLDOWN = 10  # secondes entre deux tentatives de reconnexion
 
 # Codes de retour MQTT pour diagnostic
 MQTT_ERROR_CODES = {
@@ -101,7 +103,7 @@ def on_connect(client, userdata, flags, rc):
 def on_disconnect(client, userdata, rc):
     """Callback appelé lors de la déconnexion MQTT"""
     if rc != 0:
-        logging.warning("🔌 Déconnexion MQTT inattendue (code: %s)", rc)
+        logging.warning("🔌 Déconnexion MQTT inattendue (code: %s). Une reconnexion sera tentée automatiquement.", rc)
     else:
         logging.info("🔌 Déconnexion MQTT normale")
 
@@ -318,9 +320,17 @@ def listen():
             logging.warning("Configuration Niko manquante, fonctionnement en mode dégradé")
             
         # Boucle principale du démon
+        last_mqtt_check = time.time()
         while True:
             time.sleep(0.5)
             read_socket()
+
+            # Vérification périodique de la connexion MQTT (toutes les 30s)
+            now = time.time()
+            if _niko_ip and _niko_jwt and now - last_mqtt_check >= 30:
+                last_mqtt_check = now
+                if not mqtt_client_instance or not mqtt_client_instance.is_connected():
+                    ensure_mqtt_connected()
             
     except KeyboardInterrupt:
         logging.info("Arrêt demandé par l'utilisateur")
@@ -379,6 +389,47 @@ def start_mqtt_client():
         logging.error("💥 Erreur lors du démarrage MQTT: %s", e)
         logging.error("🔍 Type d'erreur: %s", type(e).__name__)
         logging.warning("⚠️  Continuons en mode dégradé sans MQTT")
+
+def ensure_mqtt_connected():
+    """Vérifie la connexion MQTT et tente une reconnexion si nécessaire.
+
+    Retourne True si le client est connecté, False sinon.
+    Respecte un cooldown entre les tentatives pour éviter de surcharger la passerelle.
+    """
+    global _last_mqtt_reconnect_attempt
+
+    if mqtt_client_instance and mqtt_client_instance.is_connected():
+        return True
+
+    if not _niko_ip or not _niko_jwt:
+        return False
+
+    now = time.time()
+    if now - _last_mqtt_reconnect_attempt < MQTT_RECONNECT_COOLDOWN:
+        return False
+
+    _last_mqtt_reconnect_attempt = now
+    logging.warning("🔄 Client MQTT non connecté, tentative de reconnexion...")
+
+    # Nettoyer l'ancien client si existant
+    try:
+        if mqtt_client_instance:
+            mqtt_client_instance.loop_stop()
+            mqtt_client_instance.disconnect()
+    except Exception:
+        pass
+
+    start_mqtt_client()
+
+    # Laisser un court délai pour que la connexion s'établisse
+    time.sleep(2)
+
+    if mqtt_client_instance and mqtt_client_instance.is_connected():
+        logging.info("✅ Reconnexion MQTT réussie")
+        return True
+    else:
+        logging.warning("⚠️ Reconnexion MQTT échouée, nouvelle tentative dans %ds", MQTT_RECONNECT_COOLDOWN)
+        return False
 
 def read_socket():
     """Lit les messages du socket Jeedom"""
@@ -505,15 +556,16 @@ def send_niko_command(device_id, command, value=None):
     logging.info("📤 Envoi commande %s à %s (valeur: %s)", command, device_id, value)
     
     if not mqtt_client_instance or not mqtt_client_instance.is_connected():
-        logging.error("❌ Client MQTT non connecté")
-        jeedom_com_instance.send_change_immediate({
-            'action': 'command_error',
-            'device_id': device_id,
-            'command': command,
-            'error': 'mqtt_not_connected'
-        })
-        return
-    
+        if not ensure_mqtt_connected():
+            logging.error("❌ Client MQTT non connecté et reconnexion échouée")
+            jeedom_com_instance.send_change_immediate({
+                'action': 'command_error',
+                'device_id': device_id,
+                'command': command,
+                'error': 'mqtt_not_connected'
+            })
+            return
+
     try:
         # Construire le message selon le protocole Niko Home Control
         mqtt_message = build_niko_command_message(device_id, command, value)
@@ -628,9 +680,10 @@ def discover_niko_devices_mqtt():
     logging.info("🔍 Découverte des équipements Niko via MQTT...")
     
     if not mqtt_client_instance or not mqtt_client_instance.is_connected():
-        logging.error("❌ Client MQTT non connecté pour la découverte")
-        return []
-    
+        if not ensure_mqtt_connected():
+            logging.error("❌ Client MQTT non connecté pour la découverte et reconnexion échouée")
+            return []
+
     try:
         # Variables pour la découverte
         discovered_devices = []
@@ -839,80 +892,81 @@ def shutdown():
     sys.stdout.flush()
     os._exit(0)
 
-# Parsing des arguments passés par Jeedom au démon
-parser = argparse.ArgumentParser(description='Démon pour le plugin Niko Home Control')
-parser.add_argument("--loglevel", help="Log Level for the daemon", type=str)
-parser.add_argument("--callback", help="Callback", type=str)
-parser.add_argument("--apikey", help="Apikey", type=str)
-parser.add_argument("--pid", help="Pid file", type=str)
-parser.add_argument("--socketport", help="Socket Port", type=int)
-parser.add_argument("--niko_ip", help="Niko Gateway IP", type=str)
-parser.add_argument("--niko_jwt", help="Niko JWT Token", type=str)
-args = parser.parse_args()
+if __name__ == '__main__':
+    # Parsing des arguments passés par Jeedom au démon
+    parser = argparse.ArgumentParser(description='Démon pour le plugin Niko Home Control')
+    parser.add_argument("--loglevel", help="Log Level for the daemon", type=str)
+    parser.add_argument("--callback", help="Callback", type=str)
+    parser.add_argument("--apikey", help="Apikey", type=str)
+    parser.add_argument("--pid", help="Pid file", type=str)
+    parser.add_argument("--socketport", help="Socket Port", type=int)
+    parser.add_argument("--niko_ip", help="Niko Gateway IP", type=str)
+    parser.add_argument("--niko_jwt", help="Niko JWT Token", type=str)
+    args = parser.parse_args()
 
-# Configuration initiale
-_pidfile = '/tmp/nhc_demond.pid'
-if args.pid:
-    _pidfile = args.pid
+    # Configuration initiale
+    _pidfile = '/tmp/nhc_demond.pid'
+    if args.pid:
+        _pidfile = args.pid
 
-_log_level = "error"
-if args.loglevel:
-    _log_level = args.loglevel
+    _log_level = "error"
+    if args.loglevel:
+        _log_level = args.loglevel
 
-_apikey = ""
-if args.apikey:
-    _apikey = args.apikey
-    
-_callback = ""
-if args.callback:
-    _callback = args.callback
+    _apikey = ""
+    if args.apikey:
+        _apikey = args.apikey
 
-_socketport = 55001
-if args.socketport:
-    _socketport = args.socketport
+    _callback = ""
+    if args.callback:
+        _callback = args.callback
 
-# On récupère l'IP et le Jeton passés en argument
-_niko_ip = ""
-if args.niko_ip:
-    _niko_ip = args.niko_ip
+    _socketport = 55001
+    if args.socketport:
+        _socketport = args.socketport
 
-_niko_jwt = ""
-if args.niko_jwt:
-    _niko_jwt = args.niko_jwt
+    # On récupère l'IP et le Jeton passés en argument
+    _niko_ip = ""
+    if args.niko_ip:
+        _niko_ip = args.niko_ip
 
-# Configuration des logs
-jeedom_utils.set_log_level(_log_level)
+    _niko_jwt = ""
+    if args.niko_jwt:
+        _niko_jwt = args.niko_jwt
 
-logging.info('Start nhc daemon')
-logging.info('Log level : %s', _log_level)
-logging.info('Socket port : %s', _socketport)
-logging.info('PID file : %s', _pidfile)
-logging.info('Callback : %s', _callback)
-logging.info('API key : %s...', _apikey[:10] if _apikey else 'NON DÉFINI')
-logging.info('Niko Gateway IP : %s', _niko_ip if _niko_ip else 'NON CONFIGURÉ')
-logging.info('Niko JWT Token : %s...', _niko_jwt[:20] if _niko_jwt else 'NON CONFIGURÉ')
+    # Configuration des logs
+    jeedom_utils.set_log_level(_log_level)
 
-# Vérification des paramètres essentiels pour Jeedom
-if not _apikey:
-    logging.error("Clé API manquante. Arrêt du démon.")
-    sys.exit(1)
+    logging.info('Start nhc daemon')
+    logging.info('Log level : %s', _log_level)
+    logging.info('Socket port : %s', _socketport)
+    logging.info('PID file : %s', _pidfile)
+    logging.info('Callback : %s', _callback)
+    logging.info('API key : %s...', _apikey[:10] if _apikey else 'NON DÉFINI')
+    logging.info('Niko Gateway IP : %s', _niko_ip if _niko_ip else 'NON CONFIGURÉ')
+    logging.info('Niko JWT Token : %s...', _niko_jwt[:20] if _niko_jwt else 'NON CONFIGURÉ')
 
-if not _callback:
-    logging.error("URL de callback manquante. Arrêt du démon.")
-    sys.exit(1)
+    # Vérification des paramètres essentiels pour Jeedom
+    if not _apikey:
+        logging.error("Clé API manquante. Arrêt du démon.")
+        sys.exit(1)
 
-# Avertissement si la configuration Niko n'est pas complète
-if not _niko_ip or not _niko_jwt:
-    logging.warning("Configuration Niko incomplète. Le démon fonctionnera en mode dégradé.")
+    if not _callback:
+        logging.error("URL de callback manquante. Arrêt du démon.")
+        sys.exit(1)
 
-# Gestion des signaux d'arrêt
-signal.signal(signal.SIGINT, handler)
-signal.signal(signal.SIGTERM, handler)
+    # Avertissement si la configuration Niko n'est pas complète
+    if not _niko_ip or not _niko_jwt:
+        logging.warning("Configuration Niko incomplète. Le démon fonctionnera en mode dégradé.")
 
-# Lancement du démon
-try:
-    jeedom_utils.write_pid(str(_pidfile))
-    listen() # On lance notre fonction principale
-except Exception as e:
-    logging.error('Fatal error: %s', e)
-    shutdown()
+    # Gestion des signaux d'arrêt
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
+
+    # Lancement du démon
+    try:
+        jeedom_utils.write_pid(str(_pidfile))
+        listen() # On lance notre fonction principale
+    except Exception as e:
+        logging.error('Fatal error: %s', e)
+        shutdown()
