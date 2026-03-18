@@ -4,6 +4,7 @@
 - Reconnexion automatique MQTT en cas de perte de connexion (ex: coupure de courant simultanée de Jeedom et de la box Niko).
 - Vérification périodique de l'état de la connexion MQTT dans la boucle principale du démon.
 - Le démon est désormais importable en tant que module Python (protection `if __name__ == '__main__'`), permettant les tests unitaires.
+- Ajout d'une alerte pour notifier l'utilisateur avant l'expiration du token d'accès (JWT). Vérification quotidienne et au démarrage du démon (seuil : 30 jours).
 
 # 26/11/2025 - v1.0
 - clean des paramêtre non utilisé pour déploiement

@@ -73,9 +73,17 @@ Vérifiez les points suivants :
 - Le plugin intègre une reconnexion automatique au broker MQTT de la box Niko. Si Jeedom et la box Niko redémarrent en même temps (coupure de courant), la connexion MQTT sera automatiquement rétablie dès que la box Niko sera de nouveau disponible (vérification toutes les 30 secondes).
 - Consultez les logs `nhc` pour vérifier que la reconnexion s'est bien effectuée (message `✅ Reconnexion MQTT réussie`).
 
+## Alerte d'expiration du token JWT
+
+Le plugin vérifie automatiquement la date d'expiration de votre token JWT :
+-   **Au démarrage du démon** : une vérification est effectuée à chaque lancement.
+-   **Quotidiennement** : une tâche cron journalière vérifie l'état du token.
+
+Si le token expire dans moins de **30 jours**, une alerte apparaît dans le centre de messages de Jeedom. Si le token est déjà expiré, un message d'erreur vous invite à le renouveler.
+
+Pour renouveler votre token, suivez la procédure de génération du Hobby Profile détaillée dans la [documentation Niko](https://guide.niko.eu/fr/smnhc2/lv/hobby-api#), puis mettez à jour le token dans la configuration du plugin.
+
 
 ## Prochaines évolutions
 -   Prise en charge des prises connectées (`socket`).
--   Ajout d'une alerte pour notifier l'utilisateur avant l'expiration du token d'accès (JWT).
-- supression du template personalisé inutilisé
-- categorie des equipement volet : "opening":"1","
+-   Catégorie des équipements volet : `"opening":"1",`
